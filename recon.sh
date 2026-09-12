@@ -25,39 +25,97 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 
+show_help() {
+    echo -e "${BOLD}${CYAN}"
+    cat << 'SPLASH'
+  ██████╗ ███████╗ ██████╗ ██████╗ ███╗   ██╗
+  ██╔══██╗██╔════╝██╔════╝██╔═══██╗████╗  ██║
+  ██████╔╝█████╗  ██║     ██║   ██║██╔██╗ ██║
+  ██╔══██╗██╔══╝  ██║     ██║   ██║██║╚██╗██║
+  ██║  ██║███████╗╚██████╗╚██████╔╝██║ ╚████║
+  ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝
+SPLASH
+    echo -e "${RESET}"
+    echo -e "${BOLD}Recon Pipeline Master Controller${RESET}"
+    echo ""
+    echo -e "${BOLD}CÚ PHÁP SỬ DỤNG:${RESET}"
+    echo -e "  $0 <domain> [tùy chọn]"
+    echo ""
+    echo -e "${BOLD}TÙY CHỌN:${RESET}"
+    echo -e "  ${YELLOW}--only <bước>${RESET}     Chỉ chạy duy nhất 1 bước (ví dụ: --only 05 hoặc --only 5)"
+    echo -e "  ${YELLOW}--from <bước>${RESET}     Bắt đầu chạy từ bước chỉ định đến hết (ví dụ: --from 03)"
+    echo -e "  ${YELLOW}-h, --help${RESET}        Hiển thị hướng dẫn này"
+    echo ""
+    echo -e "${BOLD}DANH SÁCH CÁC BƯỚC TRONG PIPELINE:${RESET}"
+    echo -e "  ${GREEN}01${RESET} | ${CYAN}01_subdomain.sh${RESET}  : Thu thập subdomain (Passive: subfinder/crt.sh + Active: puredns/alterx/tls)"
+    echo -e "  ${GREEN}02${RESET} | ${CYAN}02_resolve.sh${RESET}    : Phân giải DNS & lọc Wildcard DNS nghiêm ngặt (puredns-resolve + dnsx)"
+    echo -e "  ${GREEN}03${RESET} | ${CYAN}03_cdncheck.sh${RESET}   : Phân loại IP CDN/WAF vs Origin IPs (cdncheck + CIDR filtering)"
+    echo -e "  ${GREEN}04${RESET} | ${CYAN}04_vhost.sh${RESET}      : Dò tìm Virtual Hosts trên Origin IPs (TLS SAN + SNItch + ripgen)"
+    echo -e "  ${GREEN}05${RESET} | ${CYAN}05_portscan.sh${RESET}   : Quét cổng & nhận diện dịch vụ trên Origin IPs (gogo/naabu/nmap)"
+    echo -e "  ${GREEN}06${RESET} | ${CYAN}06_service.sh${RESET}    : Quét sâu phiên bản dịch vụ & lọc CDN banner (nmap -sV -sC)"
+    echo -e "  ${GREEN}07${RESET} | ${CYAN}07_httpx.sh${RESET}      : Dò quét HTTP/HTTPS, lấy title, server banner, tech stack (httpx)"
+    echo -e "  ${GREEN}08${RESET} | ${CYAN}08_triage.sh${RESET}     : Phân tầng mục tiêu (Tier 1/2/3), trích xuất JS Endpoints & Secrets"
+    echo -e "  ${GREEN}09${RESET} | ${CYAN}09_nuclei.sh${RESET}     : Quét lỗ hổng tự động theo Tech stack, CVE, Misconfig, Exposure (nuclei)"
+    echo ""
+    echo -e "${BOLD}HƯỚNG DẪN CÁCH CHẠY:${RESET}"
+    echo -e "  ${BOLD}1. Chạy toàn bộ pipeline tự động:${RESET}"
+    echo -e "     $0 mbbank.com.vn"
+    echo ""
+    echo -e "  ${BOLD}2. Chạy duy nhất 1 bước qua Master script (Khuyên dùng):${RESET}"
+    echo -e "     $0 mbbank.com.vn --only 05       # Chỉ quét port"
+    echo -e "     $0 mbbank.com.vn --only 07       # Chỉ probe HTTP"
+    echo -e "     $0 mbbank.com.vn --only 09       # Chỉ quét nuclei"
+    echo ""
+    echo -e "  ${BOLD}3. Chạy tiếp tục từ 1 bước cụ thể:${RESET}"
+    echo -e "     $0 mbbank.com.vn --from 03       # Bỏ qua bước 01, 02 và chạy từ 03 đến hết"
+    echo ""
+    echo -e "  ${BOLD}4. Chạy trực tiếp script đơn lẻ (với tham số nâng cao riêng):${RESET}"
+    echo -e "     ./scripts/05_portscan.sh mbbank.com.vn --all-ports"
+    echo -e "     ./scripts/09_nuclei.sh mbbank.com.vn --tech tomcat"
+    echo -e "     ./scripts/09_nuclei.sh mbbank.com.vn --cve"
+    echo ""
+}
+
 # ─── Args ─────────────────────────────────────────────────────────────────────
 DOMAIN=""
 FROM_STEP=1
 ONLY_STEP=""
 
+[[ $# -eq 0 ]] && { show_help; exit 1; }
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --from) FROM_STEP="$(echo "${2:-1}" | tr -dc '0-9')"; shift 2 ;;
-        --only) ONLY_STEP="$(echo "${2:-}"  | tr -dc '0-9')"; shift 2 ;;
-        -*)     echo -e "${RED}[-]${RESET} Unknown option: $1" >&2; exit 1 ;;
+        -h|--help|help)
+            show_help
+            exit 0
+            ;;
+        --from)
+            FROM_STEP="$(echo "${2:-1}" | tr -dc '0-9')"
+            shift 2
+            ;;
+        --only)
+            ONLY_STEP="$(echo "${2:-}" | tr -dc '0-9')"
+            shift 2
+            ;;
+        -*)
+            echo -e "${RED}[-]${RESET} Unknown option: $1" >&2
+            echo -e "Sử dụng ${YELLOW}$0 --help${RESET} để xem hướng dẫn chi tiết." >&2
+            exit 1
+            ;;
         *)
             if [[ -z "$DOMAIN" ]]; then
                 DOMAIN="$(normalize_domain "$1")"
             else
-                echo -e "${RED}[-]${RESET} Unexpected argument: $1" >&2; exit 1
+                echo -e "${RED}[-]${RESET} Unexpected argument: $1" >&2
+                exit 1
             fi
-            shift ;;
+            shift
+            ;;
     esac
 done
 
 if [[ -z "$DOMAIN" ]]; then
-    echo -e "${BOLD}Usage:${RESET} $0 <domain> [--from <step>] [--only <step>]"
-    echo ""
-    echo "  --from N    Start from step N (skip 01..N-1)"
-    echo "  --only N    Run only step N"
-    echo ""
-    echo "Steps: 01=subdomain 02=resolve 03=cdn 04=vhost 05=portscan 06=service 07=httpx 08=triage"
-    echo ""
-    echo "Examples:"
-    echo "  $0 mbbank.com.vn"
-    echo "  $0 mbbank.com.vn --from 05"
-    echo "  $0 mbbank.com.vn --only 07"
-    echo "  $0 --from 02 mbbank.com.vn    # flags can come before or after domain"
+    show_help
     exit 1
 fi
 
@@ -150,9 +208,10 @@ for entry in "${PIPELINE_STEPS[@]}"; do
         continue
     fi
 
+    TOTAL_COUNT=$(printf '%02d' "${#PIPELINE_STEPS[@]}")
     echo ""
     echo -e "${BOLD}${CYAN}┌──────────────────────────────────────────────────────────────┐${RESET}"
-    echo -e "${BOLD}${CYAN}│  STEP ${step_num}/08 — ${step_name}${RESET}"
+    echo -e "${BOLD}${CYAN}│  STEP ${step_num}/${TOTAL_COUNT} — ${step_name}${RESET}"
     echo -e "${BOLD}${CYAN}│  $(date '+%H:%M:%S')${RESET}"
     echo -e "${BOLD}${CYAN}└──────────────────────────────────────────────────────────────┘${RESET}"
 
