@@ -23,6 +23,7 @@ OUT_DIR="$(output_dir "$DOMAIN")"
 INPUT="${OUT_DIR}/subdomains.txt"
 OUT_RESOLVED="${OUT_DIR}/resolved.txt"
 OUT_UNRESOLVED="${OUT_DIR}/unresolved.txt"
+OUT_WILDCARD="${OUT_DIR}/wildcard_filtered.txt"
 OUT_IPS="${OUT_DIR}/all_ips.txt"
 LOG_FILE="${OUT_DIR}/logs/02_resolve.log"
 TEMP_DIR="$(mktemp -d)"; trap 'rm -rf "$TEMP_DIR"' EXIT
@@ -60,9 +61,20 @@ if cmd_exists puredns; then
             -r "$RESOLVERS" \
             --write "${TEMP_DIR}/puredns_clean.txt" \
             --quiet 2>/dev/null || true
-        [[ -s "${TEMP_DIR}/puredns_clean.txt" ]] && CLEAN_LIST="${TEMP_DIR}/puredns_clean.txt"
+
+        if [[ -s "${TEMP_DIR}/puredns_clean.txt" ]]; then
+            # Lưu các domain bị loại do wildcard DNS
+            comm -23 \
+                <(sort -u "$CLEAN_LIST") \
+                <(sort -u "${TEMP_DIR}/puredns_clean.txt") \
+                > "$OUT_WILDCARD"
+
+            CLEAN_LIST="${TEMP_DIR}/puredns_clean.txt"
+        fi
+
         AFTER=$(count_lines "$CLEAN_LIST")
-        success "puredns: ${TOTAL_INPUT} → ${AFTER} (removed $((TOTAL_INPUT - AFTER)) wildcard FPs)"
+        WILDCARD_COUNT=$(count_lines "$OUT_WILDCARD")
+        success "puredns: ${TOTAL_INPUT} → ${AFTER} (removed ${WILDCARD_COUNT} wildcard FPs → wildcard_filtered.txt)"
     else
         warn "No resolver list found — skipping wildcard filter"
     fi
@@ -133,9 +145,12 @@ RESOLVED_COUNT=$(count_lines "$OUT_RESOLVED")
 UNRESOLVED_COUNT=$(count_lines "$OUT_UNRESOLVED")
 IP_COUNT=$(count_lines "$OUT_IPS")
 
+WILDCARD_COUNT=$(count_lines "$OUT_WILDCARD")
+
 summary_box "02 RESOLVE" \
     "Domain" "$DOMAIN" \
     "Input" "$TOTAL_INPUT subdomains" \
+    "Wildcard filtered" "$WILDCARD_COUNT (→ wildcard_filtered.txt)" \
     "Resolved" "$RESOLVED_COUNT hosts" \
     "Unresolved" "$UNRESOLVED_COUNT (vhost candidates)" \
     "Unique IPs" "$IP_COUNT" \
