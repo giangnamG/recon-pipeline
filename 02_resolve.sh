@@ -70,11 +70,18 @@ if cmd_exists puredns; then
                 > "$OUT_WILDCARD"
 
             CLEAN_LIST="${TEMP_DIR}/puredns_clean.txt"
-        fi
 
-        AFTER=$(count_lines "$CLEAN_LIST")
-        WILDCARD_COUNT=$(count_lines "$OUT_WILDCARD")
-        success "puredns: ${TOTAL_INPUT} → ${AFTER} (removed ${WILDCARD_COUNT} wildcard FPs → wildcard_filtered.txt)"
+            AFTER=$(count_lines "$CLEAN_LIST")
+            WILDCARD_COUNT=$(count_lines "$OUT_WILDCARD")
+            success "puredns: ${TOTAL_INPUT} → ${AFTER} (removed ${WILDCARD_COUNT} wildcard FPs → wildcard_filtered.txt)"
+        else
+            # puredns chạy nhưng không ra output — resolver list lỗi, crash, hoặc timeout
+            # CLEAN_LIST giữ nguyên list gốc → dnsx sẽ resolve tất cả kể cả wildcard FP
+            # → bước 04 cross-product có thể phình to bất thường
+            warn "puredns không tạo ra output — wildcard filter bị skip"
+            warn "Nguyên nhân thường gặp: resolver list hỏng, network timeout, puredns crash"
+            warn "Tiếp tục với list gốc (${TOTAL_INPUT} subdomains) — kết quả có thể có wildcard FP"
+        fi
     else
         warn "No resolver list found — skipping wildcard filter"
     fi
