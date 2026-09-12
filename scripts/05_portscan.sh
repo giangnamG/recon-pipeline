@@ -56,8 +56,10 @@ banner "05 — Port Scanning" "$DOMAIN"
 TOTAL_IPS=$(count_lines "$IN_IPS")
 info "Input: $IN_IPS ($TOTAL_IPS IPs)"
 
+ulimit -n 65535 2>/dev/null || true
+
 # Port tags gogo / port list naabu
-GOGO_PORTS="top2,top3,db,win,docker"   # gogo port tags
+GOGO_PORTS="top1,top2,top3,web,db,win,docker,cve"   # gogo port tags
 WEB_PORTS="80,443,8080,8443,8000,8001,8008,8888,3000,3001,4000,4443,5000,5001,9000,9001,9090,9443"
 ALL_PORTS="${WEB_PORTS},21,22,23,25,53,110,143,389,445,1433,1521,3306,3389,5432,5900,6379,27017,9200,9300,2181,5601"
 
@@ -185,7 +187,7 @@ if ! cmd_exists gogo || [[ ! -s "$OUT_OPEN" ]]; then
         warn "naabu not found — falling back to nmap"
         info "Tool: nmap"
 
-        nmap -iL "$IN_IPS" -p "$ALL_PORTS" -T4 --open -n -oG - 2>/dev/null \
+        nmap -Pn -iL "$IN_IPS" -p "$ALL_PORTS" -T4 --open -n -oG - 2>/dev/null \
             | awk '/Ports:/{
                 match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/, ip)
                 split($0, parts, "Ports: ")
@@ -205,39 +207,52 @@ fi
 sort -u "$OUT_OPEN" -o "$OUT_OPEN"
 
 # ══════════════════════════════════════════════════════════════════
-# Extract web ports
+# Export all open ports as web probe candidates (No hardcoded filter)
 # ══════════════════════════════════════════════════════════════════
-IFS=',' read -ra WEB_LIST <<< "$WEB_PORTS"
-while IFS= read -r entry; do
-    port=$(echo "$entry" | cut -d':' -f2)
-    for wp in "${WEB_LIST[@]}"; do
-        [[ "$port" == "$wp" ]] && echo "$entry" >> "$OUT_WEB" && break
-    done
-done < "$OUT_OPEN"
-sort -u "$OUT_WEB" -o "$OUT_WEB"
+cp "$OUT_OPEN" "$OUT_WEB"
 
 # ══════════════════════════════════════════════════════════════════
-# Build vhost-aware URL list: ip:port → subdomain:port
+# Build vhost-aware URL list: all open ports → subdomain:port + ip:port
 # ══════════════════════════════════════════════════════════════════
-step "Building vhost URL list"
+step "Building URL list for httpx probing (all open ports)"
 
-if [[ -f "$IN_RESOLVED" ]]; then
+if [[ -s "$OUT_OPEN" ]]; then
     while IFS= read -r ip_port; do
+        [[ -z "$ip_port" ]] && continue
         ip=$(echo "$ip_port" | cut -d':' -f1)
         port=$(echo "$ip_port" | cut -d':' -f2)
 
-        grep " ${ip}$" "$IN_RESOLVED" 2>/dev/null | awk '{print $1}' \
-        | while IFS= read -r sub; do
-            case "$port" in
-                443|8443|4443|9443) echo "https://${sub}:${port}" ;;
-                80|8080|8000|8001|8008|8888|3000|3001|4000|5000|5001|9000|9001|9090)
-                    echo "http://${sub}:${port}" ;;
-                *)
-                    echo "http://${sub}:${port}"
-                    echo "https://${sub}:${port}" ;;
-            esac
-        done
-    done < "$OUT_WEB" | sort -u >> "$OUT_URLS"
+        # 1. Map to subdomains from resolved.txt
+        if [[ -f "$IN_RESOLVED" ]]; then
+            while IFS= read -r sub; do
+                [[ -z "$sub" ]] && continue
+                case "$port" in
+                    443|8443|4443|9443)
+                        echo "https://${sub}:${port}" ;;
+                    80)
+                        echo "http://${sub}:${port}" ;;
+                    8080|8000|8001|8008|8888|3000|3001|4000|5000|5001|9000|9001|9090)
+                        echo "http://${sub}:${port}" ;;
+                    *)
+                        echo "http://${sub}:${port}"
+                        echo "https://${sub}:${port}" ;;
+                esac
+            done < <(grep " ${ip}$" "$IN_RESOLVED" 2>/dev/null | awk '{print $1}')
+        fi
+
+        # 2. Also probe direct IP:port
+        case "$port" in
+            443|8443|4443|9443)
+                echo "https://${ip}:${port}" ;;
+            80)
+                echo "http://${ip}:${port}" ;;
+            8080|8000|8001|8008|8888|3000|3001|4000|5000|5001|9000|9001|9090)
+                echo "http://${ip}:${port}" ;;
+            *)
+                echo "http://${ip}:${port}"
+                echo "https://${ip}:${port}" ;;
+        esac
+    done < "$OUT_OPEN" | sort -u >> "$OUT_URLS"
 fi
 
 END_TIME=$(date +%s)

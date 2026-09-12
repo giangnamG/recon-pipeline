@@ -30,6 +30,7 @@ HTTP_DIR="${OUT_DIR}/http"
 mkdir -p "$HTTP_DIR"
 
 IN_VHOST_URLS="${OUT_DIR}/ports/vhost_urls.txt"
+IN_OPEN_PORTS="${OUT_DIR}/ports/open.txt"
 IN_ALL_VHOSTS="${OUT_DIR}/vhosts/all_vhosts.txt"
 IN_RESOLVED="${OUT_DIR}/resolved.txt"
 OUT_LIVE="${HTTP_DIR}/live.txt"
@@ -56,6 +57,10 @@ PROBE_LIST="${TEMP_DIR}/probe_targets.txt"
 if [[ -f "$IN_VHOST_URLS" && -s "$IN_VHOST_URLS" ]]; then
     info "Using: vhost URL list (ports/vhost_urls.txt)"
     cp "$IN_VHOST_URLS" "$PROBE_LIST"
+
+elif [[ -f "$IN_OPEN_PORTS" && -s "$IN_OPEN_PORTS" ]]; then
+    info "Using: open ports list (ports/open.txt)"
+    cp "$IN_OPEN_PORTS" "$PROBE_LIST"
 
 elif [[ -f "$IN_ALL_VHOSTS" && -s "$IN_ALL_VHOSTS" ]]; then
     info "Using: verified vhosts (vhosts/all_vhosts.txt)"

@@ -69,6 +69,7 @@ for ip in "${!IP_PORTS[@]}"; do
 
     nmap \
         -sV -sC \
+        -Pn \
         -T4 \
         --open \
         -p "$ports" \
