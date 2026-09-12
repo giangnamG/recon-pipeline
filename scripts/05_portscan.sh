@@ -37,6 +37,7 @@ mkdir -p "$PORT_DIR"
 IN_IPS="${OUT_DIR}/origin_ips.txt"
 IN_RESOLVED="${OUT_DIR}/resolved.txt"
 OUT_OPEN="${PORT_DIR}/open.txt"
+OUT_CLOSED="${PORT_DIR}/closed_ips.txt"
 OUT_WEB="${PORT_DIR}/web.txt"
 OUT_URLS="${PORT_DIR}/vhost_urls.txt"
 OUT_GOGO_JSON="${PORT_DIR}/gogo.json"
@@ -49,7 +50,7 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 [[ -f "$IN_IPS" && -s "$IN_IPS" ]] || { error "Missing: $IN_IPS — run 03_cdncheck.sh first"; exit 1; }
 
-> "$OUT_OPEN"; > "$OUT_WEB"; > "$OUT_URLS"; > "$OUT_FINGERPRINT"
+> "$OUT_OPEN"; > "$OUT_CLOSED"; > "$OUT_WEB"; > "$OUT_URLS"; > "$OUT_FINGERPRINT"
 
 banner "05 — Port Scanning" "$DOMAIN"
 
@@ -207,6 +208,15 @@ fi
 sort -u "$OUT_OPEN" -o "$OUT_OPEN"
 
 # ══════════════════════════════════════════════════════════════════
+# Identify IPs with no open ports (Origin IPs - Open IPs)
+# ══════════════════════════════════════════════════════════════════
+awk -F':' '{print $1}' "$OUT_OPEN" | sort -u > "${TEMP_DIR}/open_ips.txt"
+comm -23 \
+    <(sort -u "$IN_IPS") \
+    <(sort -u "${TEMP_DIR}/open_ips.txt") \
+    > "$OUT_CLOSED"
+
+# ══════════════════════════════════════════════════════════════════
 # Export all open ports as web probe candidates (No hardcoded filter)
 # ══════════════════════════════════════════════════════════════════
 cp "$OUT_OPEN" "$OUT_WEB"
@@ -260,10 +270,14 @@ ELAPSED=$(( END_TIME - START_TIME ))
 ELAPSED_FMT=$(printf '%02d:%02d:%02d' $((ELAPSED/3600)) $(((ELAPSED%3600)/60)) $((ELAPSED%60)))
 
 FP_COUNT=$(count_lines "$OUT_FINGERPRINT")
+OPEN_IPS_COUNT=$(count_lines "${TEMP_DIR}/open_ips.txt")
+CLOSED_IPS_COUNT=$(count_lines "$OUT_CLOSED")
 
 summary_box "05 PORT SCAN" \
     "Domain" "$DOMAIN" \
     "IPs scanned" "$TOTAL_IPS" \
+    "IPs with open ports" "$OPEN_IPS_COUNT" \
+    "Closed/Filtered IPs" "$CLOSED_IPS_COUNT (→ ports/closed_ips.txt)" \
     "Open ports" "$(count_lines "$OUT_OPEN") ip:port" \
     "Web ports" "$(count_lines "$OUT_WEB")" \
     "Vhost URLs" "$(count_lines "$OUT_URLS")" \

@@ -91,7 +91,8 @@ flowchart TD
     * Công nghệ / Framework phát hiện (`fw:xxx`).
     * Lỗ hổng CVE nếu có (`VULN:xxx`).
 
-### Giai đoạn 3: Chuẩn hóa & Sinh URL cho HTTP Probing
+### Giai đoạn 3: Chuẩn hóa, Lưu IP không mở cổng & Sinh URL cho HTTP Probing
+* **Lưu IP không mở cổng (`ports/closed_ips.txt`)**: Script sử dụng `comm -23` so sánh danh sách `origin_ips.txt` với danh sách các IP có cổng mở để lưu toàn bộ các IP đóng / bị firewall filter vào `ports/closed_ips.txt`.
 * **Không lọc cứng Web Ports**: Toàn bộ các cổng mở trong `open.txt` được sao chép sang `web.txt` để đảm bảo không bỏ sót bất kỳ cổng dịch vụ nào.
 * **Xây dựng `vhost_urls.txt` (Vhost-aware URL mapping)**:
   * Đọc từng `ip:port` mở:
@@ -112,6 +113,7 @@ Tất cả kết quả được lưu tại thư mục `output/<domain>/ports/` (
 | File Output | Định dạng | Mô tả nội dung |
 | :--- | :--- | :--- |
 | `open.txt` | `ip:port` | Danh sách tất cả các cổng mở được phát hiện trên toàn bộ Origin IPs (đã loại bỏ trùng lặp). |
+| `closed_ips.txt` | `ip` | Danh sách các IP không mở cổng nào (bị đóng hoặc firewall drop/filter). |
 | `web.txt` | `ip:port` | Danh sách port mở chuyển tiếp cho các bước HTTP probing tiếp theo. |
 | `vhost_urls.txt` | URL list | Danh sách URL hoàn chỉnh (`http(s)://sub:port` & `http(s)://ip:port`) làm input chuẩn cho `07_httpx.sh`. |
 | `gogo.json` | JSON format | Toàn bộ dữ liệu thô từ công cụ `gogo` (kèm thông số cấu hình và metadata). |
