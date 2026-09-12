@@ -409,6 +409,10 @@ try:
         results = [r for r in results if r.get("length", 0) != common_size]
         print(f"  [!] {original_count} results — FP filter: removed size={common_size}, kept {len(results)}")
 
+    # Filter ffuf calibration probe words (bắt đầu bằng dấu chấm: .htaccessXXX, .phpXXX)
+    # Đây là request ffuf tự gửi để học baseline, không phải real vhost
+    results = [r for r in results if not r["input"].get("FUZZ", "").startswith(".")]
+
     with open(out_file, "a") as out:
         for r in results:
             word = r["input"].get("FUZZ", "")
@@ -470,12 +474,34 @@ else
         local safe_ip="${ip//\./_}"
         local json_ac="${temp_dir}/ffuf_${safe_ip}.json"
 
-        # Pass 1: -ac auto-calibrate
+        # ── Pre-check: catch-all server detection ──────────────────────────
+        # Gửi 2 random hostname hoàn toàn khác nhau.
+        # Nếu cả 2 đều respond 2xx/3xx → server là catch-all → skip ffuf
+        # (ffuf sẽ cho toàn bộ wordlist là "found" → noise, không có giá trị)
+        local rnd1="zzcatchall${RANDOM}aa.${domain}"
+        local rnd2="zzcatchall${RANDOM}bb.${domain}"
+        local sz1 sz2
+        sz1=$(curl -sk -m 6 -o /dev/null -w '%{http_code}' \
+            -H "Host: ${rnd1}" --resolve "${rnd1}:443:${ip}" \
+            "https://${ip}/" 2>/dev/null || echo 0)
+        sz2=$(curl -sk -m 6 -o /dev/null -w '%{http_code}' \
+            -H "Host: ${rnd2}" --resolve "${rnd2}:443:${ip}" \
+            "https://${ip}/" 2>/dev/null || echo 0)
+
+        # Nếu cả 2 random host đều 2xx/3xx → catch-all, bỏ qua
+        local is_2xx_3xx='2[0-9][0-9]\|3[0-9][0-9]'
+        if echo "$sz1" | grep -qE '^(2|3)[0-9]{2}$' && \
+           echo "$sz2" | grep -qE '^(2|3)[0-9]{2}$'; then
+            echo "  [ffuf] ${ip}: SKIP — catch-all server (${sz1}/${sz2} on random hosts)"
+            return 0
+        fi
+
+        # Pass 1: -ac auto-calibrate (với -acc để force aggressive calibration)
         ffuf \
             -w "${wl}:FUZZ" \
             -u "https://${ip}/" \
             -H "Host: FUZZ.${domain}" \
-            -ac \
+            -ac -acc \
             -mc 200,201,204,301,302,307,308,401,403,405 \
             -t 50 -timeout 8 \
             -o "$json_ac" -of json -s \
