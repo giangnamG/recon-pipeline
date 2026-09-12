@@ -157,7 +157,7 @@ fi
 # ══════════════════════════════════════════════════════════════════
 if ! cmd_exists gogo || [[ ! -s "$OUT_OPEN" ]]; then
     if cmd_exists naabu; then
-        [[ ! cmd_exists gogo ]] && warn "gogo not found — using naabu"
+        ! cmd_exists gogo && warn "gogo not found — using naabu"
         [[ -s "$OUT_OPEN" ]] || warn "gogo produced no output — using naabu as supplement"
         info "Tool: naabu (ProjectDiscovery)"
         info "Ports: $ALL_PORTS"
