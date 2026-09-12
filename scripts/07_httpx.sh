@@ -59,9 +59,10 @@ HTTP_DIR="${OUT_DIR}/http"
 mkdir -p "$HTTP_DIR"
 
 IN_CANDIDATE_URLS="${OUT_DIR}/ports/candidate_urls.txt"
-IN_PROBE_URLS="${OUT_DIR}/ports/probe_urls.txt"  # fallback
-IN_VHOST_URLS="${OUT_DIR}/ports/vhost_urls.txt"  # legacy fallback
+IN_PROBE_URLS="${OUT_DIR}/ports/probe_urls.txt"
+IN_VHOST_URLS="${OUT_DIR}/ports/vhost_urls.txt"
 IN_OPEN_PORTS="${OUT_DIR}/ports/open.txt"
+IN_WEB_PORTS="${OUT_DIR}/ports/web.txt"
 IN_ALL_VHOSTS="${OUT_DIR}/vhosts/all_vhosts.txt"
 IN_RESOLVED="${OUT_DIR}/resolved.txt"
 OUT_LIVE="${HTTP_DIR}/live.txt"
@@ -83,48 +84,126 @@ ulimit -n 65535 2>/dev/null || true
 START_TIME=$(date +%s)
 
 # ──────────────────────────────────────────────
-# Build probe target list
+# Build probe target list (Merge & Deduplicate All Sources)
 # ──────────────────────────────────────────────
 PROBE_LIST="${TEMP_DIR}/probe_targets.txt"
+RAW_TARGETS="${TEMP_DIR}/raw_targets.txt"
+touch "$RAW_TARGETS"
 
+MERGED_SOURCES=0
+
+# 1. Candidate URLs from 05_portscan.sh
 if [[ -f "$IN_CANDIDATE_URLS" && -s "$IN_CANDIDATE_URLS" ]]; then
-    info "Using: candidate URL list (ports/candidate_urls.txt)"
-    cp "$IN_CANDIDATE_URLS" "$PROBE_LIST"
+    local_count=$(count_lines "$IN_CANDIDATE_URLS")
+    info "Merging candidate URLs (ports/candidate_urls.txt: $local_count URLs)"
+    cat "$IN_CANDIDATE_URLS" >> "$RAW_TARGETS"
+    ((MERGED_SOURCES++)) || true
+fi
 
-elif [[ -f "$IN_PROBE_URLS" && -s "$IN_PROBE_URLS" ]]; then
-    info "Using: probe URL list (ports/probe_urls.txt)"
-    cp "$IN_PROBE_URLS" "$PROBE_LIST"
+# 2. Probe URLs (secondary/fallback from ports)
+if [[ -f "$IN_PROBE_URLS" && -s "$IN_PROBE_URLS" ]]; then
+    local_count=$(count_lines "$IN_PROBE_URLS")
+    info "Merging probe URLs (ports/probe_urls.txt: $local_count URLs)"
+    cat "$IN_PROBE_URLS" >> "$RAW_TARGETS"
+    ((MERGED_SOURCES++)) || true
+fi
 
-elif [[ -f "$IN_VHOST_URLS" && -s "$IN_VHOST_URLS" ]]; then
-    info "Using: legacy probe URL list (ports/vhost_urls.txt)"
-    cp "$IN_VHOST_URLS" "$PROBE_LIST"
+# 3. Legacy VHost URLs
+if [[ -f "$IN_VHOST_URLS" && -s "$IN_VHOST_URLS" ]]; then
+    local_count=$(count_lines "$IN_VHOST_URLS")
+    info "Merging legacy vhost URLs (ports/vhost_urls.txt: $local_count URLs)"
+    cat "$IN_VHOST_URLS" >> "$RAW_TARGETS"
+    ((MERGED_SOURCES++)) || true
+fi
 
-elif [[ -f "$IN_OPEN_PORTS" && -s "$IN_OPEN_PORTS" ]]; then
-    info "Using: open ports list (ports/open.txt)"
-    cp "$IN_OPEN_PORTS" "$PROBE_LIST"
-
-elif [[ -f "$IN_ALL_VHOSTS" && -s "$IN_ALL_VHOSTS" ]]; then
-    info "Using: verified vhosts (vhosts/all_vhosts.txt)"
-    # Format: hostname<TAB>ip<TAB>proto[<TAB>source]
-    # Build proto://hostname
+# 4. Verified VHosts from 04_vhost.sh
+if [[ -f "$IN_ALL_VHOSTS" && -s "$IN_ALL_VHOSTS" ]]; then
+    local_count=$(count_lines "$IN_ALL_VHOSTS")
+    info "Merging verified vhosts (vhosts/all_vhosts.txt: $local_count hosts)"
     awk -F'\t' '{
+        hostname = $1
         proto = $3
-        if (proto == "") proto = "https"
-        if (proto !~ /^http/) proto = "https"
-        print proto "://" $1
-    }' "$IN_ALL_VHOSTS" | sort -u > "$PROBE_LIST"
+        if (hostname != "") {
+            if (proto ~ /^http/) {
+                print proto "://" hostname
+            } else {
+                print "https://" hostname
+                print "http://" hostname
+            }
+        }
+    }' "$IN_ALL_VHOSTS" >> "$RAW_TARGETS"
+    ((MERGED_SOURCES++)) || true
+fi
 
-elif [[ -f "$IN_RESOLVED" && -s "$IN_RESOLVED" ]]; then
-    info "Using: resolved subdomains (fallback: :80 + :443)"
-    awk '{print "http://" $1 "\nhttps://" $1}' "$IN_RESOLVED" \
-        | sort -u > "$PROBE_LIST"
-else
-    error "No input found — run 05_portscan.sh or 04_vhost.sh first"
+# 5. Open ports & Web ports (Direct IP:Port + Hostname:Port)
+COMBINED_PORTS="${TEMP_DIR}/combined_ports.txt"
+touch "$COMBINED_PORTS"
+[[ -f "$IN_OPEN_PORTS" && -s "$IN_OPEN_PORTS" ]] && cat "$IN_OPEN_PORTS" >> "$COMBINED_PORTS"
+[[ -f "$IN_WEB_PORTS" && -s "$IN_WEB_PORTS" ]] && cat "$IN_WEB_PORTS" >> "$COMBINED_PORTS"
+
+if [[ -s "$COMBINED_PORTS" ]]; then
+    sort -u "$COMBINED_PORTS" -o "$COMBINED_PORTS"
+    local_count=$(count_lines "$COMBINED_PORTS")
+    info "Merging open ports (ports/open.txt & web.txt: $local_count ip:port entries)"
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        ip="${line%%:*}"
+        port="${line##*:}"
+        
+        case "$port" in
+            443|8443|4443|9443)
+                echo "https://${ip}:${port}" >> "$RAW_TARGETS" ;;
+            80)
+                echo "http://${ip}:${port}" >> "$RAW_TARGETS" ;;
+            8080|8000|8001|8008|8888|3000|3001|4000|5000|5001|9000|9001|9090)
+                echo "http://${ip}:${port}" >> "$RAW_TARGETS"
+                echo "https://${ip}:${port}" >> "$RAW_TARGETS" ;;
+            *)
+                echo "http://${ip}:${port}" >> "$RAW_TARGETS"
+                echo "https://${ip}:${port}" >> "$RAW_TARGETS" ;;
+        esac
+
+        # Also map subdomains pointing to this IP on this port if resolved.txt exists
+        if [[ -f "$IN_RESOLVED" && -s "$IN_RESOLVED" ]]; then
+            while IFS= read -r sub; do
+                [[ -z "$sub" ]] && continue
+                case "$port" in
+                    443)  echo "https://${sub}" >> "$RAW_TARGETS" ;;
+                    80)   echo "http://${sub}" >> "$RAW_TARGETS" ;;
+                    8443|4443|9443) echo "https://${sub}:${port}" >> "$RAW_TARGETS" ;;
+                    *)    echo "http://${sub}:${port}" >> "$RAW_TARGETS"
+                          echo "https://${sub}:${port}" >> "$RAW_TARGETS" ;;
+                esac
+            done < <(grep -w "$ip" "$IN_RESOLVED" 2>/dev/null | awk '{print $1}')
+        fi
+    done < "$COMBINED_PORTS"
+    ((MERGED_SOURCES++)) || true
+fi
+
+# 6. Resolved subdomains on standard ports (:80 / :443)
+if [[ -f "$IN_RESOLVED" && -s "$IN_RESOLVED" ]]; then
+    local_count=$(count_lines "$IN_RESOLVED")
+    info "Merging resolved subdomains on standard ports (resolved.txt: $local_count domains)"
+    awk '{
+        subdomain = $1
+        if (subdomain != "") {
+            print "https://" subdomain
+            print "http://" subdomain
+        }
+    }' "$IN_RESOLVED" >> "$RAW_TARGETS"
+    ((MERGED_SOURCES++)) || true
+fi
+
+# Check if any targets were gathered
+if [[ ! -s "$RAW_TARGETS" ]]; then
+    error "No input found from any source (ports, vhosts, or resolved subdomains)"
+    error "Please run 02_resolve.sh, 04_vhost.sh, or 05_portscan.sh first"
     exit 1
 fi
 
+sort -u "$RAW_TARGETS" | awk 'NF' > "$PROBE_LIST"
 TOTAL=$(count_lines "$PROBE_LIST")
-info "Targets: $TOTAL URLs to probe"
+success "Merged & Deduplicated from $MERGED_SOURCES sources → Total $TOTAL unique URLs to probe"
 
 # ──────────────────────────────────────────────
 # Run httpx

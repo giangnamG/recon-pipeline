@@ -44,34 +44,33 @@
 
 ---
 
-## 3. Kiến trúc Input & Thứ tự ưu tiên Fallback
+## 3. Kiến trúc Input (Merge & Deduplicate All Sources)
 
-Script được thiết kế thông minh với cơ chế fallback 6 tầng để luôn đảm bảo có dữ liệu dò quét tốt nhất:
+Script quét và **hợp nhất (Merge) toàn bộ tất cả các nguồn dữ liệu có sẵn**, sau đó tiến hành **loại bỏ trùng lặp (Deduplicate)** để đưa vào `httpx`:
 
 ```mermaid
 flowchart TD
-    A{"Kiểm tra ports/candidate_urls.txt"} -- "Có dữ liệu" --> B["Ưu tiên 1: candidate_urls.txt\n(subdomain:port + ip:port từ 05_portscan)"]
-    A -- "Không có / Rỗng" --> C{"Kiểm tra ports/probe_urls.txt"}
-    C -- "Có dữ liệu" --> D["Ưu tiên 2: probe_urls.txt"]
-    C -- "Không có / Rỗng" --> E{"Kiểm tra ports/vhost_urls.txt"}
-    E -- "Có dữ liệu" --> F["Ưu tiên 3: vhost_urls.txt (Legacy fallback)"]
-    E -- "Không có / Rỗng" --> G{"Kiểm tra ports/open.txt"}
-    G -- "Có dữ liệu" --> H["Ưu tiên 4: open.txt (Open port list)"]
-    G -- "Không có / Rỗng" --> I{"Kiểm tra vhosts/all_vhosts.txt"}
-    I -- "Có dữ liệu" --> J["Ưu tiên 5: all_vhosts.txt (Verified VHosts từ bước 04)"]
-    I -- "Không có / Rỗng" --> K{"Kiểm tra resolved.txt"}
-    K -- "Có dữ liệu" --> L["Ưu tiên 6: resolved.txt (Fallback: ghép http/https trên :80/:443)"]
-    K -- "Không có" --> M["Báo lỗi: Yêu cầu chạy 04_vhost.sh hoặc 05_portscan.sh trước"]
+    S1["1. ports/candidate_urls.txt\n(subdomain:port + ip:port)"] --> M["Bộ gom Target thô (RAW_TARGETS)"]
+    S2["2. ports/probe_urls.txt & vhost_urls.txt"] --> M
+    S3["3. vhosts/all_vhosts.txt\n(Verified VHosts)"] --> M
+    S4["4. ports/open.txt & web.txt\n(Direct IP:port + Subdomain:port)"] --> M
+    S5["5. resolved.txt\n(Standard :80/:443)"] --> M
+    M --> D["sort -u (Deduplicate)"]
+    D --> P["PROBE_LIST (Danh sách URL duy nhất)"]
+    P --> H["httpx Engine"]
 ```
 
-| Nguồn Input | File vị trí | Mức độ ưu tiên | Ý nghĩa |
-| :--- | :--- | :---: | :--- |
-| `candidate_urls.txt` | `output/<domain>/ports/candidate_urls.txt` | **1 (Tối ưu nhất)** | Danh sách URL ứng viên đầy đủ cả subdomain và IP kèm cổng mở do bước 05 sinh ra. |
-| `probe_urls.txt` | `output/<domain>/ports/probe_urls.txt` | 2 | Danh sách URL ứng viên dự phòng từ bước quét cổng. |
-| `vhost_urls.txt` | `output/<domain>/ports/vhost_urls.txt` | 3 | Danh sách URL VHost tương thích ngược. |
-| `open.txt` | `output/<domain>/ports/open.txt` | 4 | Danh sách `ip:port` mở thô từ bước quét cổng. |
-| `all_vhosts.txt` | `output/<domain>/vhosts/all_vhosts.txt` | 5 | Danh sách VHost đã được xác thực từ bước `04_vhost.sh`. |
-| `resolved.txt` | `output/<domain>/resolved.txt` | 6 | Danh sách subdomain sống từ bước `02_resolve.sh` (mặc định thử nghiệm trên port 80 & 443). |
+| Nguồn Input | File vị trí | Xử lý khi nạp | Mục đích |
+| :--- | :--- | :--- | :--- |
+| `candidate_urls.txt` | `output/<domain>/ports/candidate_urls.txt` | Nạp nguyên bản URL | Chứa subdomain và IP kèm cổng mở từ bước `05_portscan.sh`. |
+| `probe_urls.txt` | `output/<domain>/ports/probe_urls.txt` | Nạp nguyên bản URL | Danh sách URL ứng viên dự phòng từ bước quét cổng. |
+| `vhost_urls.txt` | `output/<domain>/ports/vhost_urls.txt` | Nạp nguyên bản URL | Danh sách URL VHost tương thích ngược. |
+| `all_vhosts.txt` | `output/<domain>/vhosts/all_vhosts.txt` | Ghép `http://` & `https://` | Danh sách VHost đã được xác thực từ bước `04_vhost.sh`. |
+| `open.txt` & `web.txt`| `output/<domain>/ports/open.txt` | Sinh `ip:port` + map với `resolved.txt` | Toàn bộ các cổng mở trực tiếp trên IP và subdomain tương ứng. |
+| `resolved.txt` | `output/<domain>/resolved.txt` | Ghép `http://` & `https://` | Toàn bộ subdomain sống trên cổng tiêu chuẩn (:80, :443). |
+
+> [!NOTE]
+> Khi chạy bước 07, script sẽ tự động kiểm tra sự tồn tại của từng file trên. File nào có dữ liệu sẽ được đọc và nạp vào danh sách tổng. Toàn bộ URL trùng lặp (giữa các bước hoặc giữa IP và Subdomain) sẽ được loại bỏ triệt để (`sort -u`), giúp tối ưu hóa thời gian quét và không gửi request thừa.
 
 ---
 
