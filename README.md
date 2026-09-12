@@ -155,6 +155,12 @@ output/example.com/
 │   ├── all_findings.txt    # Merged, dedup, sorted by severity
 │   ├── all_findings.json   # JSON export cho integration
 │   └── report.md           # Nuclei triage report
+├── dirfuzz/                # Directory & Content Fuzzing (ffuf)
+│   ├── raw/                # JSON output chi tiết từng target
+│   ├── discovered_paths.txt# Tổng hợp toàn bộ đường dẫn tìm thấy
+│   ├── sensitive_files.txt # File nhạy cảm (.env, .git, .bak, .sql, config, dump)
+│   ├── admin_panels.txt    # Trang quản trị, dashboard, swagger, api-docs
+│   └── all.json            # Merged JSON findings
 └── logs/                   # Log từng bước
     ├── 01_subdomain.log
     ├── 02_resolve.log
@@ -182,13 +188,9 @@ subdomains.txt
       ↓
   [08] triage → tier1/2/3 + js_endpoints + report.md
       ↓
-  [09] nuclei →
-    Tech scan: http/all.json → tech fingerprint → per-tech CVE templates
-    Phase 2: live.txt → CVE (2020-2025) + exposure + misconfig + specific
-    Phase 3: ports/open.txt + origin_ips.txt → network service vulns
+  [09] nuclei → CVE, Exposures, Misconfigurations, Network Services
       ↓
-    nuclei/all_findings.txt  (merged, sorted by severity)
-    nuclei/report.md
+  [10] dirfuzz → ffuf trên Tier 1/Interesting → sensitive_files.txt + admin_panels.txt
 ```
 
 ---

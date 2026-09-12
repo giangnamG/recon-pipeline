@@ -35,6 +35,7 @@ PIPELINE_STEPS=(
     "07:07_httpx.sh:HTTP Probing"
     "08:08_triage.sh:Triage & JS Analysis"
     "09:09_nuclei.sh:Nuclei Vulnerability Scan"
+    "10:10_dirfuzz.sh:Directory & Content Fuzzing"
 )
 
 show_help() {
@@ -54,7 +55,7 @@ SPLASH
     echo -e "  $0 <domain> [tùy chọn]"
     echo ""
     echo -e "${BOLD}TÙY CHỌN:${RESET}"
-    echo -e "  ${YELLOW}--only <bước>${RESET}     Chỉ chạy duy nhất 1 bước (ví dụ: --only 05 hoặc --only 5)"
+    echo -e "  ${YELLOW}--only <bước>${RESET}     Chỉ chạy duy nhất 1 bước (ví dụ: --only 05 hoặc --only 10)"
     echo -e "  ${YELLOW}--from <bước>${RESET}     Bắt đầu chạy từ bước chỉ định đến hết (ví dụ: --from 03)"
     echo -e "  ${YELLOW}-h, --help${RESET}        Hiển thị hướng dẫn tổng quan (hoặc kết hợp với --only để xem helper từng bước)"
     echo ""
@@ -68,6 +69,7 @@ SPLASH
     echo -e "  ${GREEN}07${RESET} | ${CYAN}07_httpx.sh${RESET}      : Dò quét HTTP/HTTPS, lấy title, server banner, tech stack (httpx)"
     echo -e "  ${GREEN}08${RESET} | ${CYAN}08_triage.sh${RESET}     : Phân tầng mục tiêu (Tier 1/2/3), trích xuất JS Endpoints & Secrets"
     echo -e "  ${GREEN}09${RESET} | ${CYAN}09_nuclei.sh${RESET}     : Quét lỗ hổng tự động theo Tech stack, CVE, Misconfig, Exposure (nuclei)"
+    echo -e "  ${GREEN}10${RESET} | ${CYAN}10_dirfuzz.sh${RESET}    : Dò tìm đường dẫn & tệp tin ẩn, admin panels, API docs (ffuf)"
     echo ""
     echo -e "${BOLD}HƯỚNG DẪN CÁCH CHẠY:${RESET}"
     echo -e "  ${BOLD}1. Chạy toàn bộ pipeline tự động:${RESET}"
@@ -77,10 +79,11 @@ SPLASH
     echo -e "     $0 mbbank.com.vn --only 05       # Chỉ quét port"
     echo -e "     $0 mbbank.com.vn --only 07       # Chỉ probe HTTP"
     echo -e "     $0 mbbank.com.vn --only 09       # Chỉ quét nuclei"
+    echo -e "     $0 mbbank.com.vn --only 10       # Chỉ fuzz directory bằng ffuf"
     echo ""
     echo -e "  ${BOLD}3. Xem helper của từng bước cụ thể:${RESET}"
     echo -e "     $0 --only 05 --help              # Xem chi tiết options của bước 05"
-    echo -e "     $0 --only 09 --help              # Xem chi tiết options của bước 09 (nuclei)"
+    echo -e "     $0 --only 10 --help              # Xem chi tiết options của bước 10 (ffuf)"
     echo ""
     echo -e "  ${BOLD}4. Chạy tiếp tục từ 1 bước cụ thể:${RESET}"
     echo -e "     $0 mbbank.com.vn --from 03       # Bỏ qua bước 01, 02 và chạy từ 03 đến hết"
