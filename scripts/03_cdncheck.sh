@@ -191,11 +191,13 @@ with open(origin_out, "w") as f:
         f.write(ip + "\n")
         print(f"  [ORIGIN]  {ip:<20} {name}")
 
-with open(cdn_out, "w") as f:
+with open(cdn_out, "a") as f:
     for ip, name in sorted(cdns):
         f.write(ip + "\n")
         print(f"  [CDN/WAF] {ip:<20} {name}")
 PYEOF
+
+    sort -u "$OUT_CDN" -o "$OUT_CDN"
 
     # IPs not classified by cdncheck → treat as origin
     # NOTE: comm uses REMAINING_IPS (pre-filtered), not INPUT_IPS
