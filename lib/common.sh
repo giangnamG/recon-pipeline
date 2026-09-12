@@ -38,10 +38,17 @@ normalize_domain() {
 usage() { echo -e "${BOLD}Usage:${RESET} $*"; }
 
 output_dir() {
-    # All output goes to output/<domain>/ relative to pipeline/ parent
+    # Output goes to:
+    #   $RECON_OUTPUT_DIR/<domain>/   nếu env var được set
+    #   ../output/<domain>/           mặc định — nằm ngoài thư mục pipeline/
     local domain="$1"
     local base
-    base="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/output/${domain}"
+    if [[ -n "${RECON_OUTPUT_DIR:-}" ]]; then
+        base="${RECON_OUTPUT_DIR}/${domain}"
+    else
+        # pipeline/lib/../.. = thư mục cha của pipeline/
+        base="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/output/${domain}"
+    fi
     mkdir -p "$base"
     echo "$base"
 }
