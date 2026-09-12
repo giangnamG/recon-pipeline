@@ -68,7 +68,7 @@ info "Input: $IN_IPS ($TOTAL_IPS IPs)"
 ulimit -n 65535 2>/dev/null || true
 
 # Port tags gogo / port list naabu
-GOGO_PORTS="top1,top2,top3,web,db,win,docker,cve"   # gogo port tags
+GOGO_PORTS="common,rce,cloud,mail,http,db,brute,win,info,in,top1,top2,top3,docker,k8s,cve"   # all gogo preset port tags
 WEB_PORTS="80,443,8080,8443,8000,8001,8008,8888,3000,3001,4000,4443,5000,5001,9000,9001,9090,9443"
 ALL_PORTS="${WEB_PORTS},21,22,23,25,53,110,143,389,445,1433,1521,3306,3389,5432,5900,6379,27017,9200,9300,2181,5601"
 

@@ -52,7 +52,7 @@ Quy trình hoạt động của `05_portscan.sh` bao gồm các giai đoạn sau
 ```mermaid
 flowchart TD
     A["Input: origin_ips.txt"] --> B{"Kiểm tra công cụ Scanner"}
-    B -- "Có gogo" --> C["Tool 1: gogo scan + active fingerprint\n(Tags: top1,top2,top3,web,db,win,docker,cve)"]
+    B -- "Có gogo" --> C["Tool 1: gogo scan + active fingerprint\n(Tags: common,rce,cloud,mail,http,db,brute,win,info,in,top1,top2,top3,docker,k8s,cve)"]
     B -- "Không có gogo / gogo rỗng" --> D{"Kiểm tra naabu"}
     D -- "Có naabu" --> E["Tool 2: naabu scan\n(Danh sách ALL_PORTS)"]
     D -- "Không có naabu" --> F["Tool 3: nmap fallback\n(nmap -Pn -iL ... -p ... -T4)"]
@@ -70,7 +70,7 @@ flowchart TD
 1. **Thiết lập ulimit**: Thực thi `ulimit -n 65535` để tránh nghẽn file descriptor khi mở nhiều luồng quét song song.
 2. **Thứ tự ưu tiên công cụ**:
    * **Ưu tiên 1 (`gogo`)**:
-     * Sử dụng tập port tags toàn diện: `top1,top2,top3,web,db,win,docker,cve`.
+     * Sử dụng tập port tags toàn diện: `common,rce,cloud,mail,http,db,brute,win,info,in,top1,top2,top3,docker,k8s,cve` (bao quát 379+ cổng cốt lõi và các vector tấn công chuyên sâu).
      * Quét và xuất file nhị phân `.dat`, sau đó tự động convert sang `gogo_raw.json`.
      * Tự động lấy fingerprint, SSL certificate Subject/SAN, HTTP title, Web framework và kiểm tra lỗ hổng CVE tích hợp.
    * **Ưu tiên 2 (`naabu`)**:
