@@ -47,7 +47,7 @@ output_dir() {
         base="${RECON_OUTPUT_DIR}/${domain}"
     else
         # pipeline/lib/../.. = thư mục cha của pipeline/
-        base="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/output/${domain}"
+        base="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/recon_output/${domain}"
     fi
     mkdir -p "$base"
     echo "$base"
