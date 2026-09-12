@@ -181,15 +181,24 @@ if [[ -f "$OUT_PARSED" && -s "$OUT_PARSED" ]]; then
 
     if [[ "$CDN_BANNER_COUNT" -gt 0 ]]; then
         warn "Found $CDN_BANNER_COUNT CDN IPs missed by cdncheck (detected via banner):"
+
+        # Backup trước khi sửa — tránh mất data nếu script crash
+        cp "${OUT_DIR}/origin_ips.txt" "${OUT_DIR}/origin_ips.txt.bak"
+
+        # Build filtered list một lần từ tất cả CDN IPs (không sửa in-place từng IP)
+        grep -vFf "$OUT_CDN_BANNER" "${OUT_DIR}/origin_ips.txt" \
+            > "${TEMP_DIR}/origin_filtered.txt" 2>/dev/null || true
+
+        # Chỉ replace sau khi filter thành công
+        if [[ -f "${TEMP_DIR}/origin_filtered.txt" ]]; then
+            cp "${TEMP_DIR}/origin_filtered.txt" "${OUT_DIR}/origin_ips.txt"
+        fi
+
         while IFS= read -r ip; do
             warn "  CDN-by-banner → $ip"
-            # Remove from origin_ips.txt
-            grep -v "^${ip}$" "${OUT_DIR}/origin_ips.txt" > "${TEMP_DIR}/origin_filtered.txt" 2>/dev/null || true
-            cp "${TEMP_DIR}/origin_filtered.txt" "${OUT_DIR}/origin_ips.txt"
-            # Append to cdn_ips.txt
             echo "$ip" >> "${OUT_DIR}/cdn_ips.txt"
-            sort -u "${OUT_DIR}/cdn_ips.txt" -o "${OUT_DIR}/cdn_ips.txt"
         done < "$OUT_CDN_BANNER"
+        sort -u "${OUT_DIR}/cdn_ips.txt" -o "${OUT_DIR}/cdn_ips.txt"
         success "Moved $CDN_BANNER_COUNT CDN IPs from origin_ips.txt → cdn_ips.txt"
     else
         success "No hidden CDN IPs found via banner"

@@ -250,7 +250,7 @@ step "Step 3/4 — Secret Scanning (JS files)"
 if [[ -f "$JS_RAW" && -s "$JS_RAW" ]]; then
     # Regex patterns for common secrets
     python3 - "$JS_RAW" "$OUT_JS_SEC" <<'PYEOF'
-import sys, re, urllib.request, urllib.error
+import sys, re, os, urllib.request, urllib.error
 
 js_list_file = sys.argv[1]
 out_file     = sys.argv[2]
@@ -278,7 +278,10 @@ findings = []
 with open(js_list_file) as f:
     js_urls = [line.strip() for line in f if line.strip()]
 
-for url in js_urls[:50]:  # limit to first 50 JS files
+JS_SCAN_LIMIT = int(os.environ.get("JS_SCAN_LIMIT", "0")) or len(js_urls)
+if len(js_urls) > JS_SCAN_LIMIT:
+    print(f"  [!] {len(js_urls)} JS files found — scanning all {JS_SCAN_LIMIT} (set JS_SCAN_LIMIT=N to cap)")
+for url in js_urls[:JS_SCAN_LIMIT]:  # scan tất cả, hoặc theo JS_SCAN_LIMIT env var
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         resp = urllib.request.urlopen(req, timeout=8)

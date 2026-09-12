@@ -110,6 +110,27 @@ PASSED=()
 FAILED=()
 SKIPPED=()
 
+# ─── Resume state ─────────────────────────────────────────────────────────────
+RESUME_FILE="${OUT_DIR}/resume.cfg"
+
+save_resume() {
+    local step="$1"
+    echo "last_completed_step=${step}" > "$RESUME_FILE"
+    echo "domain=${DOMAIN}" >> "$RESUME_FILE"
+    echo "timestamp=$(date '+%Y-%m-%d %H:%M:%S')" >> "$RESUME_FILE"
+}
+
+# Auto-detect resume nếu không có --from và có resume.cfg
+if [[ -z "$ONLY_STEP" && "$FROM_STEP" -eq 1 && -f "$RESUME_FILE" ]]; then
+    LAST_STEP=$(grep '^last_completed_step=' "$RESUME_FILE" 2>/dev/null | cut -d'=' -f2 | tr -dc '0-9')
+    if [[ -n "$LAST_STEP" && "$LAST_STEP" -gt 0 ]]; then
+        NEXT_STEP=$(( LAST_STEP + 1 ))
+        warn "resume.cfg found: last completed step = ${LAST_STEP}"
+        warn "Auto-resuming from step ${NEXT_STEP} (use --from 01 to restart from beginning)"
+        FROM_STEP=$NEXT_STEP
+    fi
+fi
+
 # ─── Run steps ────────────────────────────────────────────────────────────────
 for entry in "${PIPELINE_STEPS[@]}"; do
     IFS=':' read -r step_num script_file step_name <<< "$entry"
@@ -142,6 +163,7 @@ for entry in "${PIPELINE_STEPS[@]}"; do
         STEP_FMT=$(printf '%02d:%02d' $((STEP_ELAPSED/60)) $((STEP_ELAPSED%60)))
         success "Step ${step_num} done in ${STEP_FMT}"
         PASSED+=("${step_num}:${STEP_FMT}")
+        save_resume "$step_num"
     else
         EXIT_CODE=$?
         STEP_END=$(date +%s)

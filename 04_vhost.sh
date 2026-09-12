@@ -159,13 +159,33 @@ elif [[ ! -f "$FFUF_WORDLIST" ]]; then
 else
     info "Wordlist: $FFUF_WORDLIST"
 
+    # Lọc bỏ subdomain đã biết khỏi wordlist → tránh lặp lại bước 01
+    FFUF_FILTERED_WL="${TEMP_DIR}/ffuf_wordlist_filtered.txt"
+    if [[ -f "$IN_SUBDOMAINS" ]]; then
+        # Extract prefix (phần trước domain) từ subdomains đã biết
+        KNOWN_PREFIXES="${TEMP_DIR}/known_prefixes.txt"
+        sed "s/\.${DOMAIN}$//" "$IN_SUBDOMAINS" 2>/dev/null \
+            | awk '{print tolower($0)}' | sort -u > "$KNOWN_PREFIXES"
+
+        # Loại những word đã có trong known prefixes
+        comm -23 \
+            <(awk '{print tolower($0)}' "$FFUF_WORDLIST" | sort -u) \
+            "$KNOWN_PREFIXES" > "$FFUF_FILTERED_WL"
+
+        ORIG=$(wc -l < "$FFUF_WORDLIST")
+        AFTER=$(wc -l < "$FFUF_FILTERED_WL")
+        info "Wordlist filtered: $ORIG → $AFTER words (removed $((ORIG - AFTER)) known subdomains)"
+    else
+        cp "$FFUF_WORDLIST" "$FFUF_FILTERED_WL"
+    fi
+
     while IFS= read -r ip; do
         [[ -z "$ip" ]] && continue
         info "ffuf → $ip"
         FFUF_JSON="${TEMP_DIR}/ffuf_${ip//\./_}.json"
 
         ffuf \
-            -w "$FFUF_WORDLIST:FUZZ" \
+            -w "${FFUF_FILTERED_WL}:FUZZ" \
             -u "https://${ip}/" \
             -H "Host: FUZZ.${DOMAIN}" \
             -ac \
@@ -319,8 +339,40 @@ fi
 # ══════════════════════════════════════════════════════════════════
 step "Merging all layers"
 
-cat "$OUT_VERIFIED" "$OUT_FFUF" "$OUT_SNITCHED" "$OUT_PERMS" 2>/dev/null \
-    | sort -u > "$OUT_ALL"
+# Dedup theo hostname (col 1) — giữ dòng đầu tiên mỗi hostname
+# sort -u chỉ dedup dòng giống hệt, có thể trùng hostname với IP khác nhau
+# → dùng awk để dedup theo hostname, ưu tiên: verified > ffuf > tlsx > permutation
+python3 - "$OUT_VERIFIED" "$OUT_FFUF" "$OUT_SNITCHED" "$OUT_PERMS" "$OUT_ALL" <<'PYEOF'
+import sys
+
+files   = sys.argv[1:5]
+out_all = sys.argv[5]
+
+seen_hosts = {}   # hostname → best entry
+
+for fpath in files:
+    try:
+        with open(fpath) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split('\t')
+                host = parts[0].lower() if parts else ""
+                if not host:
+                    continue
+                # Giữ entry đầu tiên gặp (files đã theo thứ tự ưu tiên)
+                if host not in seen_hosts:
+                    seen_hosts[host] = line
+    except FileNotFoundError:
+        pass
+
+with open(out_all, 'w') as f:
+    for host, line in sorted(seen_hosts.items()):
+        f.write(line + '\n')
+
+print(f"  Merged: {len(seen_hosts)} unique hostnames")
+PYEOF
 
 END_TIME=$(date +%s)
 ELAPSED=$(( END_TIME - START_TIME ))
