@@ -38,7 +38,8 @@ show_help() {
     echo -e "  $0 <domain> [tùy chọn]"
     echo ""
     echo -e "${BOLD}CÁC TÙY CHỌN MỤC TIÊU (Target Selection):${RESET}"
-    echo -e "  ${YELLOW}--all-live${RESET}             Quét toàn bộ HTTP targets trong http/live.txt (Mặc định: chỉ quét Tier 1 & Interesting)"
+    echo -e "  ${GREEN}(Mặc định)${RESET}              Quét toàn bộ live HTTP endpoints từ bước 07 (http/live.txt)"
+    echo -e "  ${YELLOW}--tier1${RESET}                Chỉ quét các mục tiêu ưu tiên cao Tier 1 & Interesting từ bước 08"
     echo -e "  ${YELLOW}--url <URL>${RESET}            Chỉ quét duy nhất 1 URL cụ thể"
     echo -e "  ${YELLOW}--targets <file>${RESET}       Chỉ định file chứa danh sách URL cần quét"
     echo ""
@@ -56,8 +57,8 @@ show_help() {
     echo -e "  ${YELLOW}-h, --help${RESET}             Hiển thị hướng dẫn này"
     echo ""
     echo -e "${BOLD}VÍ DỤ:${RESET}"
-    echo -e "  $0 mbbank.com.vn                                    # Quét mặc định các mục tiêu Tier 1"
-    echo -e "  $0 mbbank.com.vn --all-live                         # Quét tất cả live HTTP targets"
+    echo -e "  $0 mbbank.com.vn                                    # Mặc định: Quét toàn bộ live endpoints từ 07_httpx.sh"
+    echo -e "  $0 mbbank.com.vn --tier1                            # Chỉ quét các mục tiêu Tier 1 & Interesting"
     echo -e "  $0 mbbank.com.vn --url https://api.mbbank.com.vn    # Quét 1 URL cụ thể"
     echo -e "  $0 mbbank.com.vn --rate 50 --threads 20             # Giảm tốc độ để tránh WAF block"
     echo ""
@@ -75,7 +76,7 @@ DOMAIN="$(normalize_domain "$1")"
 shift || true
 
 # ─── Options & Defaults ──────────────────────────────────────────────────────
-ALL_LIVE=0
+TIER1_ONLY=0
 CUSTOM_URL=""
 CUSTOM_TARGETS=""
 CUSTOM_WORDLIST=""
@@ -90,19 +91,20 @@ RECURSION_DEPTH=1
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --all-live)        ALL_LIVE=1; shift ;;
-        --url)             CUSTOM_URL="${2:-}"; shift 2 ;;
-        --targets)         CUSTOM_TARGETS="${2:-}"; shift 2 ;;
-        -w|--wordlist)     CUSTOM_WORDLIST="${2:-}"; shift 2 ;;
-        -e|--ext)          EXTENSIONS="${2:-}"; shift 2 ;;
-        --no-ext)          NO_EXT=1; shift ;;
-        -t|--threads)      THREADS="${2:-40}"; shift 2 ;;
-        -r|--rate)         RATE_LIMIT="${2:-150}"; shift 2 ;;
-        --concurrency)     MAX_TARGET_CONCURRENCY="${2:-3}"; shift 2 ;;
-        --recursion)       RECURSION=1; shift ;;
-        --recursion-depth) RECURSION_DEPTH="${2:-1}"; shift 2 ;;
-        -*)                warn "Unknown option: $1"; shift ;;
-        *)                 shift ;;
+        --tier1|--only-tier1) TIER1_ONLY=1; shift ;;
+        --all-live)           shift ;; # default behavior, kept for backward compatibility
+        --url)                CUSTOM_URL="${2:-}"; shift 2 ;;
+        --targets)            CUSTOM_TARGETS="${2:-}"; shift 2 ;;
+        -w|--wordlist)        CUSTOM_WORDLIST="${2:-}"; shift 2 ;;
+        -e|--ext)             EXTENSIONS="${2:-}"; shift 2 ;;
+        --no-ext)             NO_EXT=1; shift ;;
+        -t|--threads)         THREADS="${2:-40}"; shift 2 ;;
+        -r|--rate)            RATE_LIMIT="${2:-150}"; shift 2 ;;
+        --concurrency)        MAX_TARGET_CONCURRENCY="${2:-3}"; shift 2 ;;
+        --recursion)          RECURSION=1; shift ;;
+        --recursion-depth)    RECURSION_DEPTH="${2:-1}"; shift 2 ;;
+        -*)                   warn "Unknown option: $1"; shift ;;
+        *)                    shift ;;
     esac
 done
 
@@ -259,33 +261,36 @@ elif [[ -n "$CUSTOM_TARGETS" && -f "$CUSTOM_TARGETS" ]]; then
     awk '{print $1}' "$CUSTOM_TARGETS" | grep -E '^https?://' | sort -u > "$TARGETS_FILE"
     info "Target mode: Custom targets file ($CUSTOM_TARGETS)"
 
-elif [[ "$ALL_LIVE" -eq 1 ]]; then
-    if [[ -f "$IN_LIVE" && -s "$IN_LIVE" ]]; then
-        awk '{print $1}' "$IN_LIVE" | grep -E '^https?://' | sort -u > "$TARGETS_FILE"
-        info "Target mode: All live HTTP targets (http/live.txt)"
-    fi
-
-else
-    # Default: Tier 1 + Interesting
+elif [[ "$TIER1_ONLY" -eq 1 ]]; then
+    # Mode --tier1: Tier 1 + Interesting from step 08
     if [[ -f "$IN_TIER1" && -s "$IN_TIER1" ]]; then
         awk '{print $1}' "$IN_TIER1" | grep -E '^https?://' >> "$TARGETS_FILE" || true
     fi
     if [[ -f "$IN_INTERESTING" && -s "$IN_INTERESTING" ]]; then
         awk '{print $1}' "$IN_INTERESTING" | grep -E '^https?://' >> "$TARGETS_FILE" || true
     fi
-
-    # Deduplicate
     if [[ -s "$TARGETS_FILE" ]]; then
         sort -u "$TARGETS_FILE" -o "$TARGETS_FILE"
         info "Target mode: Tier 1 & Interesting ($(count_lines "$TARGETS_FILE") targets)"
-    elif [[ -f "$IN_LIVE" && -s "$IN_LIVE" ]]; then
+    else
+        warn "No Tier 1 targets found — falling back to all live endpoints"
+    fi
+fi
+
+# Default (or fallback): All live HTTP endpoints from step 07 (http/live.txt)
+if [[ ! -s "$TARGETS_FILE" ]]; then
+    if [[ -f "$IN_LIVE" && -s "$IN_LIVE" ]]; then
         awk '{print $1}' "$IN_LIVE" | grep -E '^https?://' | sort -u > "$TARGETS_FILE"
-        info "Target mode: Fallback to all live targets (http/live.txt)"
+        info "Target mode: Default — All live endpoints from 07_httpx.sh ($(count_lines "$TARGETS_FILE") targets)"
+    elif [[ -f "${OUT_DIR}/http/all.json" && -s "${OUT_DIR}/http/all.json" ]]; then
+        # Fallback extract from all.json
+        jq -r '.[].url // .[].input // empty' "${OUT_DIR}/http/all.json" 2>/dev/null | grep -E '^https?://' | sort -u > "$TARGETS_FILE" || true
+        info "Target mode: Extracted from http/all.json ($(count_lines "$TARGETS_FILE") targets)"
     fi
 fi
 
 TOTAL_TARGETS=$(count_lines "$TARGETS_FILE")
-[[ "$TOTAL_TARGETS" -gt 0 ]] || { warn "No valid targets found to fuzz — exiting"; exit 0; }
+[[ "$TOTAL_TARGETS" -gt 0 ]] || { warn "No live HTTP targets found in http/live.txt — run 07_httpx.sh first"; exit 0; }
 
 info "Total targets to fuzz: $TOTAL_TARGETS"
 

@@ -19,20 +19,20 @@
 ## 2. Cách sử dụng
 
 ```bash
-# 1. Chạy qua Master Pipeline Controller
+# 1. Chạy qua Master Pipeline Controller (Mặc định quét toàn bộ live endpoints từ bước 07)
 ./recon.sh example.com --only 10
 
-# 2. Chạy độc lập với cấu hình mặc định (Quét các target Tier 1 & Interesting)
+# 2. Chạy độc lập với cấu hình mặc định (Quét toàn bộ HTTP endpoints từ http/live.txt)
 ./scripts/10_dirfuzz.sh example.com
 
-# 3. Quét toàn bộ HTTP targets còn sống (http/live.txt)
-./scripts/10_dirfuzz.sh example.com --all-live
+# 3. Chỉ quét các mục tiêu ưu tiên cao Tier 1 & Interesting từ bước 08
+./scripts/10_dirfuzz.sh example.com --tier1
 
 # 4. Quét duy nhất một URL chỉ định
 ./scripts/10_dirfuzz.sh example.com --url https://api.example.com
 
 # 5. Tùy chỉnh danh sách phần mở rộng (Extensions)
-./scripts/10_dirfuzz.sh example.com --ext php,json,env,bak,sql
+./scripts/10_dirfuzz.sh example.com --ext .php,.json,.env,.bak,.sql
 
 # 6. Tối ưu hiệu năng & Rate limit (tránh bị WAF/Rate limit chặn)
 ./scripts/10_dirfuzz.sh example.com --rate 50 --threads 20 --concurrency 2
@@ -45,7 +45,8 @@
 
 | Tham số | Giá trị mặc định | Mô tả |
 | :--- | :--- | :--- |
-| `--all-live` | `off` | Quét toàn bộ danh sách `http/live.txt` thay vì chỉ quét Tier 1 & Interesting. |
+| `(Mặc định)` | `http/live.txt` | Tự động đọc và quét toàn bộ các live HTTP endpoints từ bước `07_httpx.sh`. |
+| `--tier1` | `off` | Chỉ quét các mục tiêu ưu tiên cao `triage/tier1.txt` & `http/interesting.txt` từ bước 08. |
 | `--url <URL>` | `""` | Quét duy nhất 1 URL cụ thể. |
 | `--targets <file>` | `""` | Chỉ định file danh sách target URL tùy chỉnh. |
 | `-w, --wordlist <file>` | `dirsearch.txt` | Chỉ định đường dẫn wordlist tùy chỉnh. |
