@@ -128,8 +128,74 @@ verify_vhost() {
     [[ "$baseline" != "$real" ]] && return 0
     return 1
 }
-export -f verify_vhost
 export DOMAIN
+# NOTE: verify_vhost không export-f vì worker script inline logic riêng
+
+# ── Parallel Layer 1 worker ────────────────────────────────────────
+# Ghi worker script vào TEMP_DIR để xargs -P có thể gọi
+# Input (4 args): ip host proto source_tag
+# Output: ghi vào OUT_VERIFIED (dùng flock tránh race condition)
+L1_WORKER="${TEMP_DIR}/l1_worker.sh"
+L1_LOCK="${TEMP_DIR}/verified.lock"
+L1_COUNTER="${TEMP_DIR}/counter"      # file đếm số task đã chạy xong
+touch "$L1_LOCK" "$L1_COUNTER"
+
+cat > "$L1_WORKER" <<'WORKER_EOF'
+#!/usr/bin/env bash
+# Positional args (từ xargs -L 1): ip host proto tag
+# Env vars (export từ parent):      L1_OUT L1_LOCK L1_CNTLOCK DOMAIN
+ip="$1" host="$2" proto="$3" tag="$4"
+
+# Inline verify_vhost — không dùng export -f để tránh bash version issues
+port=443; [[ "$proto" == "http" ]] && port=80
+rnd="zz${RANDOM}notreal.${DOMAIN}"
+empty_md5="d41d8cd98f00b204e9800998ecf8427e"
+
+baseline=$(curl -sk -m 8 --resolve "${rnd}:${port}:${ip}" \
+    "${proto}://${rnd}/" 2>/dev/null \
+    | tr -d '[:space:]' | md5sum | cut -d' ' -f1)
+
+real=$(curl -sk -m 8 --resolve "${host}:${port}:${ip}" \
+    "${proto}://${host}/" 2>/dev/null \
+    | tr -d '[:space:]' | md5sum | cut -d' ' -f1)
+
+if [[ -n "$real" && "$real" != "$empty_md5" && "$baseline" != "$real" ]]; then
+    ( flock -x 9
+      printf '%s\t%s\t%s\t%s\n' "$host" "$ip" "$proto" "$tag" >> "$L1_OUT"
+    ) 9>>"$L1_LOCK"
+    echo "FOUND:${tag}:${host}:${ip}:${proto}"
+fi
+( flock -x 9
+  n=$(cat "$L1_CNTLOCK" 2>/dev/null || echo 0)
+  echo $((n+1)) > "$L1_CNTLOCK"
+) 9>>"${L1_CNTLOCK}.lk"
+WORKER_EOF
+chmod +x "$L1_WORKER"
+
+# Hàm chạy một batch task file song song, in progress + summary
+# task_file: mỗi dòng = "ip host proto tag"
+run_parallel_l1() {
+    local task_file="$1" total="$2" label="$3"
+    [[ ! -s "$task_file" ]] && return
+    echo 0 > "$L1_COUNTER"
+
+    # Export env vars cần thiết cho worker
+    export L1_OUT="$OUT_VERIFIED"
+    export L1_LOCK="$L1_LOCK"
+    export L1_CNTLOCK="$L1_COUNTER"
+    # DOMAIN và verify_vhost đã export từ trước
+
+    # -P 30: 30 concurrent workers; -L 1: mỗi invocation nhận 1 dòng (split thành args)
+    xargs -a "$task_file" -P 30 -L 1 bash "$L1_WORKER" \
+        2>/dev/null | while IFS=: read -r flag tag host ip proto _; do
+            [[ "$flag" == "FOUND" ]] && \
+                found "${label}  ${host}  →  ${ip}  (${proto})  [${tag}]"
+        done
+
+    local done_count
+    done_count=$(cat "$L1_COUNTER" 2>/dev/null || echo 0)
+    info "  ${label}: ${done_count}/${total} tasks done"
+}
 
 # ══════════════════════════════════════════════════════════════════
 # LAYER 0: Reverse DNS PTR lookup
@@ -169,27 +235,36 @@ step "Layer 1/4 — Baseline-diff Verification (curl)"
 info "Logic: body(random_host) ≠ body(real_host) → confirmed vhost"
 
 # 1a: Resolved hostnames vs their own IP
-info "1a — Resolved hosts vs their IP..."
+info "1a — Resolved hosts vs their IP (parallel)..."
+L1A_TASKS="${TEMP_DIR}/l1a_tasks.txt"
+> "$L1A_TASKS"
 while IFS=' ' read -r host ip; do
     grep -qxF "$ip" "$IN_ORIGIN_IPS" 2>/dev/null || continue
     if is_skip_host "$host"; then
         info "  SKIP  ${host}  (managed service — not target infra)"
         continue
     fi
-    for proto in https http; do
-        if verify_vhost "$ip" "$host" "$proto"; then
-            found "VERIFIED  ${host}  →  ${ip}  (${proto})"
-            printf '%s\t%s\t%s\tdirect\n' "$host" "$ip" "$proto" >> "$OUT_VERIFIED"
-            break
-        fi
-    done
+    # Thử https trước — nếu https pass thì http không cần thiết.
+    # Worker chỉ ghi khi verify thành công, không có short-circuit qua proto.
+    # → Sinh 2 task (https + http); sau đó dedup theo hostname khi merge.
+    printf '%s %s https direct\n' "$ip" "$host" >> "$L1A_TASKS"
+    printf '%s %s http  direct\n' "$ip" "$host" >> "$L1A_TASKS"
 done < "$IN_RESOLVED"
+L1A_TOTAL=$(wc -l < "$L1A_TASKS" 2>/dev/null || echo 0)
+run_parallel_l1 "$L1A_TASKS" "$L1A_TOTAL" "1a"
+
+# Dedup 1a: cùng host → giữ https ưu tiên (sort tab-sep col3 reverse → https < http → first-seen wins)
+sort -t$'\t' -k1,1 -k3,3r "$OUT_VERIFIED" \
+    | awk -F'\t' '!seen[$1]++' \
+    > "${TEMP_DIR}/verified_dedup.txt" 2>/dev/null || true
+[[ -s "${TEMP_DIR}/verified_dedup.txt" ]] && cp "${TEMP_DIR}/verified_dedup.txt" "$OUT_VERIFIED"
 
 # 1b: Unresolved hostnames × all origin IPs (cross-product)
 if [[ "$UNRESOLVED_COUNT" -gt 0 && "$ORIGIN_COUNT" -gt 0 ]]; then
-    CROSS_TOTAL=$(( UNRESOLVED_COUNT * ORIGIN_COUNT ))
-    info "1b — Cross-product: ${UNRESOLVED_COUNT} unresolved × ${ORIGIN_COUNT} IPs = ${CROSS_TOTAL} checks"
-    COUNT=0
+    CROSS_TOTAL=$(( UNRESOLVED_COUNT * ORIGIN_COUNT * 2 ))   # ×2 protos
+    info "1b — Cross-product: ${UNRESOLVED_COUNT} unresolved × ${ORIGIN_COUNT} IPs = ${CROSS_TOTAL} tasks (parallel)"
+    L1B_TASKS="${TEMP_DIR}/l1b_tasks.txt"
+    > "$L1B_TASKS"
     while IFS= read -r host; do
         [[ -z "$host" ]] && continue
         if is_skip_host "$host"; then
@@ -198,24 +273,18 @@ if [[ "$UNRESOLVED_COUNT" -gt 0 && "$ORIGIN_COUNT" -gt 0 ]]; then
         fi
         while IFS= read -r ip; do
             [[ -z "$ip" ]] && continue
-            COUNT=$(( COUNT + 1 ))
-            printf "\r  ${DIM}[%d/%d] %s @ %s${RESET}" "$COUNT" "$CROSS_TOTAL" "$host" "$ip"
-            for proto in https http; do
-                if verify_vhost "$ip" "$host" "$proto"; then
-                    echo ""
-                    found "VERIFIED  ${host}  →  ${ip}  (${proto})  [no-dns]"
-                    printf '%s\t%s\t%s\tno-dns\n' "$host" "$ip" "$proto" >> "$OUT_VERIFIED"
-                    break
-                fi
-            done
+            printf '%s %s https no-dns\n' "$ip" "$host" >> "$L1B_TASKS"
+            printf '%s %s http  no-dns\n' "$ip" "$host" >> "$L1B_TASKS"
         done < "$IN_ORIGIN_IPS"
     done < "$IN_UNRESOLVED"
-    echo ""
+    run_parallel_l1 "$L1B_TASKS" "$CROSS_TOTAL" "1b"
 fi
 
 # 1c: PTR candidates × origin IPs
 if [[ "$PTR_COUNT" -gt 0 ]]; then
-    info "1c — PTR candidates verification (${PTR_COUNT} candidates × ${ORIGIN_COUNT} IPs)..."
+    info "1c — PTR candidates verification (parallel)..."
+    L1C_TASKS="${TEMP_DIR}/l1c_tasks.txt"
+    > "$L1C_TASKS"
     while IFS= read -r host; do
         [[ -z "$host" ]] && continue
         if is_skip_host "$host"; then
@@ -226,16 +295,19 @@ if [[ "$PTR_COUNT" -gt 0 ]]; then
         grep -qP "^${host}\t" "$OUT_VERIFIED" 2>/dev/null && continue
         while IFS= read -r ip; do
             [[ -z "$ip" ]] && continue
-            for proto in https http; do
-                if verify_vhost "$ip" "$host" "$proto"; then
-                    found "PTR VERIFIED  ${host}  →  ${ip}  (${proto})"
-                    printf '%s\t%s\t%s\tptr-lookup\n' "$host" "$ip" "$proto" >> "$OUT_VERIFIED"
-                    break
-                fi
-            done
+            printf '%s %s https ptr-lookup\n' "$ip" "$host" >> "$L1C_TASKS"
+            printf '%s %s http  ptr-lookup\n' "$ip" "$host" >> "$L1C_TASKS"
         done < "$IN_ORIGIN_IPS"
     done < "$PTR_CANDIDATES"
+    L1C_TOTAL=$(wc -l < "$L1C_TASKS" 2>/dev/null || echo 0)
+    run_parallel_l1 "$L1C_TASKS" "$L1C_TOTAL" "1c"
 fi
+
+# Dedup toàn bộ verified.txt: cùng host → giữ https ưu tiên
+sort -t$'\t' -k1,1 -k3,3r "$OUT_VERIFIED" \
+    | awk -F'\t' '!seen[$1]++' \
+    > "${TEMP_DIR}/verified_final.txt" 2>/dev/null || true
+[[ -s "${TEMP_DIR}/verified_final.txt" ]] && cp "${TEMP_DIR}/verified_final.txt" "$OUT_VERIFIED"
 
 VERIFIED_L1=$(count_lines "$OUT_VERIFIED")
 success "Layer 1: ${VERIFIED_L1} verified vhosts"
