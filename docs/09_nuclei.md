@@ -13,9 +13,10 @@
 
 # Chạy độc lập
 ./scripts/09_nuclei.sh example.com                           # tất cả 3 phase
-./scripts/09_nuclei.sh example.com --phase 1                 # chỉ tech-aware scan
-./scripts/09_nuclei.sh example.com --phase 2                 # chỉ CVE + exposure sweep
-./scripts/09_nuclei.sh example.com --phase 3                 # chỉ network service scan
+./scripts/09_nuclei.sh example.com --tech                    # chỉ tech-aware scan (Phase 1)
+./scripts/09_nuclei.sh example.com --cve                     # chỉ CVE + exposure sweep (Phase 2)
+./scripts/09_nuclei.sh example.com --network                 # chỉ network service scan (Phase 3)
+./scripts/09_nuclei.sh example.com --tech --cve              # kết hợp nhiều phase
 ./scripts/09_nuclei.sh example.com --severity critical,high  # lọc severity (default: critical,high,medium)
 ./scripts/09_nuclei.sh example.com --rate 20                 # giảm rate (default: 50 req/s)
 ./scripts/09_nuclei.sh example.com --ai-templates            # bật AI-generated templates (opt-in)
@@ -25,7 +26,11 @@
 
 | Flag | Default | Mô tả |
 |------|---------|-------|
-| `--phase 1\|2\|3\|all` | `all` | Chỉ chạy phase chỉ định |
+| `--tech` | off | Chạy Phase 1: Tech-aware scan (dựa trên tech stack phát hiện được) |
+| `--cve` | off | Chạy Phase 2: Broad CVE + Exposure + Misconfig sweep |
+| `--network` | off | Chạy Phase 3: Network-level scan trên origin IPs & ports |
+| `--all` / (mặc định) | on | Chạy đầy đủ cả 3 phase |
+| `--phase 1\|2\|3\|all` | `all` | Chỉ định phase theo số thứ tự (tương thích ngược) |
 | `--severity <list>` | `critical,high,medium` | Severity filter cho nuclei |
 | `--rate <N>` | `50` | Requests/giây |
 | `--ai-templates` | off | Bật AI-generated templates (unverified) |

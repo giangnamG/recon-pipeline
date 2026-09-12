@@ -47,11 +47,15 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
 
-[[ $# -lt 1 ]] && { usage "$0 <domain> [--phase 1|2|3|all] [--severity critical,high,medium] [--rate N] [--ai-templates]"; exit 1; }
+[[ $# -lt 1 ]] && { usage "$0 <domain> [--tech] [--cve] [--network] [--severity critical,high,medium] [--rate N] [--ai-templates]"; exit 1; }
 DOMAIN="$(normalize_domain "$1")"
 
 # ─── Options ─────────────────────────────────────────────────────────────────
-PHASE="all"
+RUN_TECH=0
+RUN_CVE=0
+RUN_NETWORK=0
+EXPLICIT_PHASE=0
+
 SEVERITY="critical,high,medium"
 RATE_LIMIT=50        # requests/second — giảm xuống nếu bị rate limit / IDS alert
 CONCURRENCY=10       # parallel targets
@@ -62,7 +66,19 @@ USE_AI_TEMPLATES=0   # --ai-templates: opt-in cho AI-generated templates (unveri
 shift
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --phase)         PHASE="$2"; shift 2 ;;
+        --tech)          RUN_TECH=1; EXPLICIT_PHASE=1; shift ;;
+        --cve)           RUN_CVE=1; EXPLICIT_PHASE=1; shift ;;
+        --network)       RUN_NETWORK=1; EXPLICIT_PHASE=1; shift ;;
+        --all)           RUN_TECH=1; RUN_CVE=1; RUN_NETWORK=1; EXPLICIT_PHASE=1; shift ;;
+        --phase)
+            case "${2:-}" in
+                1|tech)    RUN_TECH=1; EXPLICIT_PHASE=1 ;;
+                2|cve)     RUN_CVE=1; EXPLICIT_PHASE=1 ;;
+                3|network) RUN_NETWORK=1; EXPLICIT_PHASE=1 ;;
+                all)       RUN_TECH=1; RUN_CVE=1; RUN_NETWORK=1; EXPLICIT_PHASE=1 ;;
+                *)         warn "Unknown phase: ${2:-}" ;;
+            esac
+            shift 2 ;;
         --severity)      SEVERITY="$2"; shift 2 ;;
         --rate)          RATE_LIMIT="$2"; shift 2 ;;
         --ai-templates)  USE_AI_TEMPLATES=1; shift ;;
@@ -70,6 +86,13 @@ while [[ $# -gt 0 ]]; do
         *)               shift ;;
     esac
 done
+
+# If no explicit phase flag was passed, run all 3 phases by default
+if [[ "$EXPLICIT_PHASE" -eq 0 ]]; then
+    RUN_TECH=1
+    RUN_CVE=1
+    RUN_NETWORK=1
+fi
 
 # ─── Paths ───────────────────────────────────────────────────────────────────
 OUT_DIR="$(output_dir "$DOMAIN")"
@@ -276,7 +299,7 @@ info "Live targets: $TOTAL_LIVE  |  Tier 1 targets: $TOTAL_TIER1"
 # =============================================================================
 # PHASE 1: TECH-AWARE SCAN
 # =============================================================================
-if [[ "$PHASE" == "all" || "$PHASE" == "1" ]]; then
+if [[ "$RUN_TECH" -eq 1 ]]; then
     step "PHASE 1 — Tech-aware Template Selection"
     info "Strategy: parse httpx tech fingerprint → map to specific template dirs"
 
@@ -535,7 +558,7 @@ fi
 # =============================================================================
 # PHASE 2: BROAD CVE + EXPOSURE SWEEP
 # =============================================================================
-if [[ "$PHASE" == "all" || "$PHASE" == "2" ]]; then
+if [[ "$RUN_CVE" -eq 1 ]]; then
     step "PHASE 2 — CVE + Exposure Sweep (all live targets)"
 
     # 2a: CVE scan — latest 3 years (most relevant, not too noisy)
@@ -598,7 +621,7 @@ fi
 # =============================================================================
 # PHASE 3: NETWORK-LEVEL SCAN
 # =============================================================================
-if [[ "$PHASE" == "all" || "$PHASE" == "3" ]]; then
+if [[ "$RUN_NETWORK" -eq 1 ]]; then
     step "PHASE 3 — Network Service Scan (origin IPs)"
     info "Targets: ports/open.txt + origin_ips.txt"
 

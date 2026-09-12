@@ -211,7 +211,9 @@ Xem tài liệu đầy đủ: [docs/09_nuclei.md](docs/09_nuclei.md)
 Chạy nhanh:
 ```bash
 ./scripts/09_nuclei.sh example.com           # tất cả 3 phase
-./scripts/09_nuclei.sh example.com --phase 1 # chỉ tech-aware scan
+./scripts/09_nuclei.sh example.com --tech     # chỉ tech-aware scan (Phase 1)
+./scripts/09_nuclei.sh example.com --cve      # chỉ broad CVE sweep (Phase 2)
+./scripts/09_nuclei.sh example.com --network  # chỉ network service scan (Phase 3)
 ```
 
 ---
