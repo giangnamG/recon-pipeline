@@ -64,6 +64,14 @@ banner "01 — Subdomain Enumeration" "$DOMAIN"
 MERGE="${TEMP_DIR}/merge.txt"
 > "$MERGE"
 
+save_results() {
+    [[ -f "$MERGE" && -s "$MERGE" ]] || return 0
+    cat "$MERGE" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//' \
+        | grep -E "(^|\.)${DOMAIN//./\\.}$" >> "$OUT_FILE" 2>/dev/null || true
+    sort -u "$OUT_FILE" -o "$OUT_FILE"
+    > "$MERGE"
+}
+
 # ══════════════════════════════════════════════════════════════════
 # STAGE 1: PASSIVE
 # ══════════════════════════════════════════════════════════════════
@@ -116,8 +124,9 @@ curl -s --max-time 30 \
     | grep -E "(^|\.)${DOMAIN//./\\.}$" >> "$MERGE" || true
 success "certspotter done"
 
-PASSIVE_COUNT=$(sort -u "$MERGE" | wc -l | tr -d ' ')
-success "Passive total: ${PASSIVE_COUNT} unique subdomains"
+save_results
+PASSIVE_COUNT=$(count_lines "$OUT_FILE")
+success "Passive total: ${PASSIVE_COUNT} unique subdomains (saved → ${OUT_FILE})"
 
 # ══════════════════════════════════════════════════════════════════
 # STAGE 2: ACTIVE (DNS brute force)
@@ -142,21 +151,16 @@ else
         info "Pass $((i+1))/${#WORDLISTS[@]} — ${WL_NAME} ($(wc -l < "$WL") words)"
         gobuster dns -d "$DOMAIN" -w "$WL" --wildcard --no-color -q 2>/dev/null \
             | grep -oP '(?<=Found: )\S+' >> "$MERGE" || true
-        success "Pass $((i+1)) done"
+        save_results
+        success "Pass $((i+1)) done — Current total: $(count_lines "$OUT_FILE") subdomains (saved → ${OUT_FILE})"
     done
 fi
 
 # ══════════════════════════════════════════════════════════════════
-# MERGE + DEDUP
+# FINAL SUMMARY
 # ══════════════════════════════════════════════════════════════════
-step "Merging & deduplicating"
-
-# Append to existing file (preserve previous runs), then dedup in-place
-cat "$MERGE" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//' \
-    | grep -E "(^|\.)${DOMAIN//./\\.}$" >> "$OUT_FILE" 2>/dev/null || true
-sort -u "$OUT_FILE" -o "$OUT_FILE"
-
-TOTAL=$(wc -l < "$OUT_FILE" | tr -d ' ')
+save_results
+TOTAL=$(count_lines "$OUT_FILE")
 
 summary_box "01 SUBDOMAIN ENUMERATION" \
     "Domain" "$DOMAIN" \
