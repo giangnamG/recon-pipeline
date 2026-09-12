@@ -47,6 +47,8 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 banner "07 — HTTP Probing" "$DOMAIN"
 
+ulimit -n 65535 2>/dev/null || true
+
 START_TIME=$(date +%s)
 
 # ──────────────────────────────────────────────
