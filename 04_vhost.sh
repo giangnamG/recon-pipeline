@@ -525,14 +525,42 @@ except: print(0)" 2>/dev/null || echo 0)
         fi
     }
 
+    # Parallel ffuf: chạy tối đa L2_PARALLEL jobs đồng thời
+    # Mỗi job = 1 ffuf instance trên 1 IP (ffuf tự dùng -t 50 thread nội bộ)
+    # Không cần flock cho output vì parse_ffuf_json chạy SAU khi tất cả xong
+    L2_PARALLEL=5   # 5 IPs × 50 threads = 250 concurrent HTTP requests tới target
+                    # Tăng nếu target chịu được; giảm nếu bị rate-limit/block
+
+    FFUF_DONE_DIR="${TEMP_DIR}/ffuf_done"
+    mkdir -p "$FFUF_DONE_DIR"
+    FFUF_LOCK="${TEMP_DIR}/ffuf_out.lock"
+    touch "$FFUF_LOCK"
+
+    # Chạy ffuf background jobs với semaphore
     while IFS= read -r ip; do
         [[ -z "$ip" ]] && continue
-        info "ffuf → $ip"
-        FFUF_JSON="${TEMP_DIR}/ffuf_${ip//\./_}.json"
 
-        run_ffuf_on_ip "$ip" "$DOMAIN" "$FFUF_FILTERED_WL" "$OUT_FFUF" "$TEMP_DIR"
-        parse_ffuf_json "$FFUF_JSON" "$DOMAIN" "$ip" "$OUT_FFUF" "ffuf"
+        # Giới hạn concurrent jobs (semaphore)
+        while (( $(jobs -r | wc -l) >= L2_PARALLEL )); do
+            wait -n 2>/dev/null || sleep 0.5   # wait -n: bash 4.3+; fallback poll
+        done
+
+        info "ffuf → $ip [background]"
+        (
+            run_ffuf_on_ip "$ip" "$DOMAIN" "$FFUF_FILTERED_WL" "$OUT_FFUF" "$TEMP_DIR"
+            FFUF_JSON="${TEMP_DIR}/ffuf_${ip//\./_}.json"
+            # flock để append vào OUT_FFUF an toàn
+            (
+                flock -x 9
+                parse_ffuf_json "$FFUF_JSON" "$DOMAIN" "$ip" "$OUT_FFUF" "ffuf"
+            ) 9>>"$FFUF_LOCK"
+            touch "${FFUF_DONE_DIR}/${ip//\./_}"
+        ) &
     done < "$FFUF_TARGET_IPS"
+
+    # Chờ tất cả jobs còn lại
+    wait
+    info "ffuf: tất cả ${FFUF_TARGET_COUNT} jobs xong"
 
     FFUF_COUNT=$(count_lines "$OUT_FFUF")
     success "Layer 2: ${FFUF_COUNT} ffuf findings"
