@@ -8,9 +8,10 @@
 #   - Split: live / dead / interesting (admin/api/dev/staging)
 #
 # INPUT (priority order):
-#   1. output/<domain>/ports/vhost_urls.txt  — subdomain:port URLs
+#   1. output/<domain>/ports/probe_urls.txt  — candidate URLs for HTTP probing (subdomain:port + ip:port)
 #   2. output/<domain>/vhosts/all_vhosts.txt — verified vhosts (hostname ip proto)
-#   3. output/<domain>/resolved.txt          — fallback: subdomains on :80/:443
+#   3. output/<domain>/ports/open.txt        — fallback: open ports
+#   4. output/<domain>/resolved.txt          — fallback: subdomains on :80/:443
 # OUTPUT: output/<domain>/http/live.txt      — URL status title tech server
 #         output/<domain>/http/dead.txt
 #         output/<domain>/http/interesting.txt
@@ -29,7 +30,8 @@ OUT_DIR="$(output_dir "$DOMAIN")"
 HTTP_DIR="${OUT_DIR}/http"
 mkdir -p "$HTTP_DIR"
 
-IN_VHOST_URLS="${OUT_DIR}/ports/vhost_urls.txt"
+IN_PROBE_URLS="${OUT_DIR}/ports/probe_urls.txt"
+IN_VHOST_URLS="${OUT_DIR}/ports/vhost_urls.txt"  # backward compatibility fallback
 IN_OPEN_PORTS="${OUT_DIR}/ports/open.txt"
 IN_ALL_VHOSTS="${OUT_DIR}/vhosts/all_vhosts.txt"
 IN_RESOLVED="${OUT_DIR}/resolved.txt"
@@ -56,8 +58,12 @@ START_TIME=$(date +%s)
 # ──────────────────────────────────────────────
 PROBE_LIST="${TEMP_DIR}/probe_targets.txt"
 
-if [[ -f "$IN_VHOST_URLS" && -s "$IN_VHOST_URLS" ]]; then
-    info "Using: vhost URL list (ports/vhost_urls.txt)"
+if [[ -f "$IN_PROBE_URLS" && -s "$IN_PROBE_URLS" ]]; then
+    info "Using: candidate probe URL list (ports/probe_urls.txt)"
+    cp "$IN_PROBE_URLS" "$PROBE_LIST"
+
+elif [[ -f "$IN_VHOST_URLS" && -s "$IN_VHOST_URLS" ]]; then
+    info "Using: legacy probe URL list (ports/vhost_urls.txt)"
     cp "$IN_VHOST_URLS" "$PROBE_LIST"
 
 elif [[ -f "$IN_OPEN_PORTS" && -s "$IN_OPEN_PORTS" ]]; then

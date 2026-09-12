@@ -122,8 +122,9 @@ output/example.com/
 │   └── all_vhosts.txt      # Tổng hợp: host, ip, proto, source, dns_status
 ├── ports/
 │   ├── open.txt            # ip:port đang mở
-│   ├── web.txt             # Chỉ web ports
-│   └── vhost_urls.txt      # URL đầy đủ (https://subdomain:port)
+│   ├── closed_ips.txt      # IP không mở cổng nào (đóng hoặc bị firewall filter)
+│   ├── web.txt             # Danh sách port mở chuyển tiếp
+│   └── probe_urls.txt      # URL ứng viên để probe (http(s)://subdomain:port + ip:port)
 ├── services/
 │   ├── parsed.txt          # ip:port service version
 │   ├── interesting.txt     # Service đáng chú ý
@@ -141,16 +142,16 @@ output/example.com/
 │   ├── js_secrets.txt      # Secret key/token tiềm năng trong JS
 │   └── report.md           # Báo cáo tổng hợp
 ├── nuclei/
-│   ├── phase1_tech/        # Tech-aware scan (tomcat, nginx, f5, iis, spring...)
+│   ├── tech/               # Tech-aware scan (tomcat, nginx, f5, iis, spring...)
 │   │   ├── tomcat.txt
 │   │   ├── nginx.txt
 │   │   ├── tier1_extra.txt # Admin/API với default-logins + backup scan
 │   │   └── *.json          # JSON export từng tech
-│   ├── phase2_cve.txt      # CVE findings (2020–2025)
-│   ├── phase2_exposure.txt # Exposed configs/files/tokens
-│   ├── phase2_misconfig.txt# Misconfiguration findings
-│   ├── phase2_specific.txt # CORS, SSRF, JWT, LFI, XSS, SQLi
-│   ├── phase3_network.txt  # Network service vulns (Redis, MongoDB, SSH...)
+│   ├── cve.txt             # CVE findings (2020–2025)
+│   ├── exposure.txt        # Exposed configs/files/tokens
+│   ├── misconfig.txt       # Misconfiguration findings
+│   ├── vulnerabilities.txt # CORS, SSRF, JWT, LFI, XSS, SQLi
+│   ├── network.txt         # Network service vulns (Redis, MongoDB, SSH...)
 │   ├── all_findings.txt    # Merged, dedup, sorted by severity
 │   ├── all_findings.json   # JSON export cho integration
 │   └── report.md           # Nuclei triage report
@@ -173,7 +174,7 @@ subdomains.txt
       ↓
   [04] vhost → vhosts/all_vhosts.txt
       ↓
-  [05] portscan → ports/open.txt + vhost_urls.txt
+  [05] portscan → ports/open.txt + closed_ips.txt + probe_urls.txt
       ↓
   [06] service → services/parsed.txt (+ lọc CDN banner)
       ↓
@@ -182,7 +183,7 @@ subdomains.txt
   [08] triage → tier1/2/3 + js_endpoints + report.md
       ↓
   [09] nuclei →
-    Phase 1: http/all.json → tech fingerprint → per-tech CVE templates
+    Tech scan: http/all.json → tech fingerprint → per-tech CVE templates
     Phase 2: live.txt → CVE (2020-2025) + exposure + misconfig + specific
     Phase 3: ports/open.txt + origin_ips.txt → network service vulns
       ↓

@@ -16,8 +16,9 @@
 # INPUT : output/<domain>/origin_ips.txt
 #         output/<domain>/resolved.txt
 # OUTPUT: output/<domain>/ports/open.txt        — ip:port
+#         output/<domain>/ports/closed_ips.txt  — IPs with no open ports
 #         output/<domain>/ports/web.txt         — web ports only
-#         output/<domain>/ports/vhost_urls.txt  — http(s)://subdomain:port
+#         output/<domain>/ports/probe_urls.txt  — candidate URLs for HTTP probing (http(s)://subdomain:port + ip:port)
 #         output/<domain>/ports/gogo.json       — gogo full JSON (nếu dùng gogo)
 #         output/<domain>/ports/fingerprint.txt — service fingerprint từ gogo
 # =============================================================================
@@ -39,7 +40,7 @@ IN_RESOLVED="${OUT_DIR}/resolved.txt"
 OUT_OPEN="${PORT_DIR}/open.txt"
 OUT_CLOSED="${PORT_DIR}/closed_ips.txt"
 OUT_WEB="${PORT_DIR}/web.txt"
-OUT_URLS="${PORT_DIR}/vhost_urls.txt"
+OUT_URLS="${PORT_DIR}/probe_urls.txt"
 OUT_GOGO_JSON="${PORT_DIR}/gogo.json"
 OUT_FINGERPRINT="${PORT_DIR}/fingerprint.txt"
 LOG_FILE="${OUT_DIR}/logs/05_portscan.log"
@@ -280,7 +281,7 @@ summary_box "05 PORT SCAN" \
     "Closed/Filtered IPs" "$CLOSED_IPS_COUNT (→ ports/closed_ips.txt)" \
     "Open ports" "$(count_lines "$OUT_OPEN") ip:port" \
     "Web ports" "$(count_lines "$OUT_WEB")" \
-    "Vhost URLs" "$(count_lines "$OUT_URLS")" \
+    "Probe URLs" "$(count_lines "$OUT_URLS") (→ ports/probe_urls.txt)" \
     "Fingerprints" "$FP_COUNT (from gogo)" \
     "Elapsed" "$ELAPSED_FMT" \
     "Next" "06_service.sh $DOMAIN"

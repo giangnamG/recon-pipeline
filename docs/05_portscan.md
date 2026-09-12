@@ -61,8 +61,9 @@ flowchart TD
     F --> H
     G --> H
     H --> I["Dedup & Copy sang web.txt"]
-    I --> J["Ghép resolved.txt → vhost_urls.txt (http/https)"]
-    J --> K["Hoàn tất: Sẵn sàng cho 06_service.sh & 07_httpx.sh"]
+    H --> J["comm -23 origin_ips.txt → closed_ips.txt"]
+    I --> K["Ghép resolved.txt → probe_urls.txt (http/https)"]
+    K --> L["Hoàn tất: Sẵn sàng cho 06_service.sh & 07_httpx.sh"]
 ```
 
 ### Giai đoạn 1: Tối ưu Socket & Chọn Scanner (Scanner Fallback Hierarchy)
@@ -94,7 +95,7 @@ flowchart TD
 ### Giai đoạn 3: Chuẩn hóa, Lưu IP không mở cổng & Sinh URL cho HTTP Probing
 * **Lưu IP không mở cổng (`ports/closed_ips.txt`)**: Script sử dụng `comm -23` so sánh danh sách `origin_ips.txt` với danh sách các IP có cổng mở để lưu toàn bộ các IP đóng / bị firewall filter vào `ports/closed_ips.txt`.
 * **Không lọc cứng Web Ports**: Toàn bộ các cổng mở trong `open.txt` được sao chép sang `web.txt` để đảm bảo không bỏ sót bất kỳ cổng dịch vụ nào.
-* **Xây dựng `vhost_urls.txt` (Vhost-aware URL mapping)**:
+* **Xây dựng `probe_urls.txt` (Candidate URL list cho HTTP probing)**:
   * Đọc từng `ip:port` mở:
     1. Tra cứu ngược trong `resolved.txt` để tìm tất cả các subdomain trỏ về IP đó.
     2. Gán giao thức thích hợp:
@@ -115,7 +116,7 @@ Tất cả kết quả được lưu tại thư mục `output/<domain>/ports/` (
 | `open.txt` | `ip:port` | Danh sách tất cả các cổng mở được phát hiện trên toàn bộ Origin IPs (đã loại bỏ trùng lặp). |
 | `closed_ips.txt` | `ip` | Danh sách các IP không mở cổng nào (bị đóng hoặc firewall drop/filter). |
 | `web.txt` | `ip:port` | Danh sách port mở chuyển tiếp cho các bước HTTP probing tiếp theo. |
-| `vhost_urls.txt` | URL list | Danh sách URL hoàn chỉnh (`http(s)://sub:port` & `http(s)://ip:port`) làm input chuẩn cho `07_httpx.sh`. |
+| `probe_urls.txt` | URL list | Danh sách URL ứng viên (`http(s)://sub:port` & `http(s)://ip:port`) làm input chuẩn cho `07_httpx.sh`. |
 | `gogo.json` | JSON format | Toàn bộ dữ liệu thô từ công cụ `gogo` (kèm thông số cấu hình và metadata). |
 | `fingerprint.txt` | Plain Text | Bảng tổng hợp dịch vụ, status code, SSL host, framework và cảnh báo VULN/CVE từ `gogo`. |
 
@@ -138,7 +139,7 @@ Tất cả kết quả được lưu tại thư mục `output/<domain>/ports/` (
 125.212.138.88:8888  http  [200]  title:Go Web Server  banner:Golang
 ```
 
-### Mẫu `ports/vhost_urls.txt`
+### Mẫu `ports/probe_urls.txt`
 ```text
 https://api.mbbank.com.vn:443
 https://online.mbbank.com.vn:8443
