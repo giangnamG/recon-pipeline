@@ -1,4 +1,16 @@
 output/
 *.log
 *.tmp
+*.lock
 resume.cfg
+
+# Templates: chỉ commit custom, không commit downloaded repos (quá nặng)
+templates/nuclei-templates/
+templates/community/
+templates/fuzzing/
+templates/.meta/all_templates.txt
+
+# Giữ lại:
+# templates/custom/       ← tự viết, cần commit
+# templates/.meta/sources.txt
+# templates/.meta/last_update.txt

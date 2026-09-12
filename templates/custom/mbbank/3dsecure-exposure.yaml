@@ -1,0 +1,55 @@
+id: mbbank-3dsecure-exposure
+
+info:
+  name: MB Bank 3D Secure Endpoint Checks
+  author: pentest-team
+  severity: medium
+  description: |
+    3D Secure subdomains detected: 3dsecure.mbbank.com.vn (103.12.105.3),
+    3dsecure1.mbbank.com.vn (125.212.138.88), 3dstest.mbbank.com.vn (103.12.105.227).
+    Checks for: debug/test endpoints, transaction log exposure,
+    unauthenticated status pages, version disclosure.
+  tags: 3ds,payment,exposure,mbbank
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+      - "{{BaseURL}}/status"
+      - "{{BaseURL}}/health"
+      - "{{BaseURL}}/version"
+      - "{{BaseURL}}/admin"
+      - "{{BaseURL}}/test"
+      - "{{BaseURL}}/debug"
+      - "{{BaseURL}}/logs"
+      - "{{BaseURL}}/transactions"
+      - "{{BaseURL}}/api/status"
+      # Common 3DS paths
+      - "{{BaseURL}}/3ds/status"
+      - "{{BaseURL}}/acs/status"
+      - "{{BaseURL}}/mpi/status"
+
+    matchers-condition: or
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "transaction"
+          - "cardNumber"
+          - "pan"
+          - "PAN"
+          - "cvv"
+          - "CVV"
+          - "authenticationValue"
+        condition: or
+        name: sensitive-data-exposure
+
+      - type: status
+        status: [200]
+        name: endpoint-accessible
+
+      - type: regex
+        part: body
+        regex:
+          - "[0-9]{13,19}"   # potential PAN
+        name: pan-pattern

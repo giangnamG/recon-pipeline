@@ -1,0 +1,43 @@
+id: mbbank-tomcat-version-exposure
+
+info:
+  name: Apache Tomcat Version Exposed — mbbank
+  author: pentest-team
+  severity: medium
+  description: |
+    Apache Tomcat version string visible in HTTP response title or headers.
+    Detected on 103.12.104.162:443 (title: Apache Tomcat/9.0.95).
+    Confirms exact version → cross-reference known CVEs for Tomcat 9.0.x.
+  tags: tomcat,apache,exposure,mbbank
+  reference:
+    - https://tomcat.apache.org/security-9.html
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}"
+      - "{{BaseURL}}/manager/html"
+      - "{{BaseURL}}/host-manager/html"
+      - "{{BaseURL}}/examples/"
+
+    matchers-condition: or
+    matchers:
+      - type: regex
+        part: body
+        regex:
+          - "Apache Tomcat/[0-9]+\\.[0-9]+\\.[0-9]+"
+        condition: or
+
+      - type: regex
+        part: header
+        regex:
+          - "Apache-Coyote/[0-9]"
+          - "Server: Apache-Coyote"
+
+    extractors:
+      - type: regex
+        part: body
+        regex:
+          - "Apache Tomcat/([0-9]+\\.[0-9]+\\.[0-9]+)"
+        group: 1
+        name: version

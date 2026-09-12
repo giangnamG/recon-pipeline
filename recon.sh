@@ -77,6 +77,7 @@ PIPELINE_STEPS=(
     "06:06_service.sh:Service Detection"
     "07:07_httpx.sh:HTTP Probing"
     "08:08_triage.sh:Triage & JS Analysis"
+    "09:09_nuclei.sh:Nuclei Vulnerability Scan"
 )
 
 # ─── Splash ───────────────────────────────────────────────────────────────────
@@ -142,7 +143,7 @@ for entry in "${PIPELINE_STEPS[@]}"; do
         [[ "$step_num" -lt "$FROM_STEP" ]] && { SKIPPED+=("$step_num"); continue; }
     fi
 
-    SCRIPT_PATH="${SCRIPT_DIR}/${script_file}"
+    SCRIPT_PATH="${SCRIPT_DIR}/scripts/${script_file}"
     if [[ ! -f "$SCRIPT_PATH" ]]; then
         warn "Script not found: $SCRIPT_PATH — skipping"
         SKIPPED+=("$step_num")
@@ -157,7 +158,7 @@ for entry in "${PIPELINE_STEPS[@]}"; do
 
     STEP_START=$(date +%s)
 
-    if (cd "$SCRIPT_DIR" && bash "$SCRIPT_PATH" "$DOMAIN"); then
+    if (cd "${SCRIPT_DIR}/scripts" && bash "$SCRIPT_PATH" "$DOMAIN"); then
         STEP_END=$(date +%s)
         STEP_ELAPSED=$(( STEP_END - STEP_START ))
         STEP_FMT=$(printf '%02d:%02d' $((STEP_ELAPSED/60)) $((STEP_ELAPSED%60)))

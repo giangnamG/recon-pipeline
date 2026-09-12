@@ -1,0 +1,65 @@
+id: mbbank-api-endpoint-enum
+
+info:
+  name: MB Bank API Endpoint Enumeration
+  author: pentest-team
+  severity: info
+  description: |
+    Probe known MB Bank API endpoint patterns derived from subdomain analysis.
+    Subdomains found: api-gw, api-public, api-private, api-sandbox, api-mbsecurity,
+    api-marketplacegw, apidichvuhanhchinh, apirecap.
+    Tests for unauthenticated access, swagger docs, and debug endpoints.
+  tags: api,enum,mbbank,exposure
+  reference:
+    - https://api-public.mbbank.com.vn
+    - https://api-sandbox.mbbank.com.vn
+
+http:
+  - method: GET
+    path:
+      # Swagger / OpenAPI discovery
+      - "{{BaseURL}}/swagger-ui.html"
+      - "{{BaseURL}}/swagger-ui/index.html"
+      - "{{BaseURL}}/v2/api-docs"
+      - "{{BaseURL}}/v3/api-docs"
+      - "{{BaseURL}}/openapi.json"
+      - "{{BaseURL}}/openapi.yaml"
+      - "{{BaseURL}}/api-docs"
+      # Actuator (Spring Boot)
+      - "{{BaseURL}}/actuator"
+      - "{{BaseURL}}/actuator/health"
+      - "{{BaseURL}}/actuator/env"
+      - "{{BaseURL}}/actuator/mappings"
+      - "{{BaseURL}}/actuator/beans"
+      # Debug endpoints
+      - "{{BaseURL}}/debug"
+      - "{{BaseURL}}/info"
+      - "{{BaseURL}}/status"
+      - "{{BaseURL}}/metrics"
+      # GraphQL
+      - "{{BaseURL}}/graphql"
+      - "{{BaseURL}}/graphiql"
+      # API versioned roots
+      - "{{BaseURL}}/api/v1"
+      - "{{BaseURL}}/api/v2"
+      - "{{BaseURL}}/api/v3"
+
+    matchers-condition: or
+    matchers:
+      - type: status
+        status: [200, 201]
+
+      - type: word
+        part: body
+        words:
+          - "swagger"
+          - "openapi"
+          - "actuator"
+          - "Spring Boot"
+        condition: or
+
+      - type: regex
+        part: body
+        regex:
+          - '"paths"\\s*:\\s*\\{'
+          - '"info"\\s*:\\s*\\{'
