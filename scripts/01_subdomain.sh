@@ -137,23 +137,42 @@ warn "Generates DNS traffic — ensure authorization"
 if ! cmd_exists gobuster; then
     warn "gobuster not found — skipping active stage (apt install gobuster)"
 else
-    WORDLISTS=(
-        "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-110000.txt"
-        "/usr/share/wordlists/n0kovo_subdomains/n0kovo_subdomains_large.txt"
+    # Danh sách wordlist tối ưu tốc độ & độ phủ (20k words siêu nhẹ + 110k words mở rộng)
+    CANDIDATES=(
+        "SecLists-20k:/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-20000.txt:/usr/share/seclists/Discovery/DNS/subdomains-top1million-20000.txt"
+        "SecLists-110k:/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-110000.txt:/usr/share/seclists/Discovery/DNS/subdomains-top1million-110000.txt"
     )
-    WORDLIST_NAMES=("SecLists-110k" "n0kovo-tiny" "n0kovo-small" "n0kovo-medium" "n0kovo-large" "n0kovo-huge")
 
-    for i in "${!WORDLISTS[@]}"; do
-        WL="${WORDLISTS[$i]}"
-        WL_NAME="${WORDLIST_NAMES[$i]}"
-        [[ -f "$WL" ]] || { warn "Wordlist not found, skip: $WL"; continue; }
+    VALID_WLS=()
+    VALID_NAMES=()
 
-        info "Pass $((i+1))/${#WORDLISTS[@]} — ${WL_NAME} ($(wc -l < "$WL") words)"
-        gobuster dns -d "$DOMAIN" -w "$WL" --wildcard --no-color -q 2>/dev/null \
-            | grep -oP '(?<=Found: )\S+' >> "$MERGE" || true
-        save_results
-        success "Pass $((i+1)) done — Current total: $(count_lines "$OUT_FILE") subdomains (saved → ${OUT_FILE})"
+    for item in "${CANDIDATES[@]}"; do
+        IFS=':' read -r name path1 path2 <<< "$item"
+        if [[ -f "$path1" ]]; then
+            VALID_WLS+=("$path1")
+            VALID_NAMES+=("$name")
+        elif [[ -n "$path2" && -f "$path2" ]]; then
+            VALID_WLS+=("$path2")
+            VALID_NAMES+=("$name")
+        fi
     done
+
+    if [[ ${#VALID_WLS[@]} -eq 0 ]]; then
+        warn "No standard DNS wordlists found in /usr/share/seclists — skipping active stage"
+    else
+        for i in "${!VALID_WLS[@]}"; do
+            WL="${VALID_WLS[$i]}"
+            WL_NAME="${VALID_NAMES[$i]}"
+            WL_LINES=$(count_lines "$WL")
+
+            info "Pass $((i+1))/${#VALID_WLS[@]} — ${WL_NAME} (${WL_LINES} words)"
+            # Tối ưu hóa gobuster với 80 threads, direct resolver 1.1.1.1 để tránh router DNS throttling
+            gobuster dns -d "$DOMAIN" -w "$WL" -t 80 -r 1.1.1.1,8.8.8.8 --timeout 2s --wildcard --no-color -q 2>/dev/null \
+                | grep -oP '(?<=Found: )\S+' >> "$MERGE" || true
+            save_results
+            success "Pass $((i+1)) done — Current total: $(count_lines "$OUT_FILE") subdomains (saved → ${OUT_FILE})"
+        done
+    fi
 fi
 
 # ══════════════════════════════════════════════════════════════════
