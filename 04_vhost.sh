@@ -209,43 +209,61 @@ PYEOF
 fi
 
 # ══════════════════════════════════════════════════════════════════
-# LAYER 3: SNItch SNI-level fuzzing
+# LAYER 3: tlsx — TLS cert SAN extraction
+# Extract Subject Alternative Names từ TLS cert của từng origin IP
+# → tìm hostname ẩn không có trong DNS (internal vhost, staging...)
 # ══════════════════════════════════════════════════════════════════
-step "Layer 3/4 — SNItch SNI-Level Fuzzing"
-info "Finds vhosts that validate at TLS handshake layer (missed by HTTP fuzzing)"
+step "Layer 3/4 — TLS Cert SAN Extraction (tlsx)"
+info "Extract SANs từ TLS cert → tìm vhost không có trong DNS"
 
-if cmd_exists SNItch; then
-    info "Tool: SNItch"
-    SNITCHED_RAW="${TEMP_DIR}/snitched_raw.txt"
+if cmd_exists tlsx; then
+    info "Tool: tlsx (ProjectDiscovery)"
+    TLSX_RAW="${TEMP_DIR}/tlsx_raw.txt"
 
+    # Probe tất cả origin IPs trên port 443 và 8443
     while IFS= read -r ip; do
         [[ -z "$ip" ]] && continue
-        info "SNItch → $ip:443"
-        SNItch -t "${ip}:443" -d "$DOMAIN" \
-            2>/dev/null >> "$SNITCHED_RAW" || true
+        for port in 443 8443; do
+            tlsx \
+                -u "${ip}:${port}" \
+                -san -cn \
+                -silent \
+                -no-color \
+                2>/dev/null >> "$TLSX_RAW" || true
+        done
     done < "$IN_ORIGIN_IPS"
 
-    # Parse SNItch output → verified format
-    if [[ -f "$SNITCHED_RAW" ]]; then
-        grep -oP '[a-z0-9._-]+\.'"${DOMAIN//./\\.}" "$SNITCHED_RAW" 2>/dev/null \
+    # Parse: "ip:port [hostname]" → extract hostname thuộc domain
+    if [[ -f "$TLSX_RAW" && -s "$TLSX_RAW" ]]; then
+        grep -oP '[a-z0-9*._-]+\.'"${DOMAIN//./\\.}" "$TLSX_RAW" 2>/dev/null \
+            | grep -v '^\*\.' \
             | sort -u \
             | while IFS= read -r host; do
-                # Try to find which IP serves it
+                # Verify: host có respond khác random không?
                 while IFS= read -r ip; do
                     if verify_vhost "$ip" "$host" "https"; then
-                        found "SNItch VERIFIED  ${host}  →  ${ip}"
-                        printf '%s\t%s\thttps\tsnitched\n' "$host" "$ip" >> "$OUT_SNITCHED"
+                        found "TLS-SAN VERIFIED  ${host}  →  ${ip}"
+                        printf '%s\t%s\thttps\ttlsx-san\n' "$host" "$ip" >> "$OUT_SNITCHED"
                         break
                     fi
                 done < "$IN_ORIGIN_IPS"
               done
+
+        # Wildcard SAN → dùng làm input cho ffuf ở layer 2 nếu có
+        WILDCARD_SANS=$(grep -oP '\*\.[a-z0-9._-]+\.'"${DOMAIN//./\\.}" "$TLSX_RAW" 2>/dev/null | sort -u)
+        if [[ -n "$WILDCARD_SANS" ]]; then
+            info "Wildcard SANs found (có thể có nhiều vhost ẩn):"
+            echo "$WILDCARD_SANS" | while IFS= read -r wc; do
+                info "  $wc"
+            done
+        fi
     fi
 
     SNITCHED_COUNT=$(count_lines "$OUT_SNITCHED")
-    success "Layer 3: ${SNITCHED_COUNT} SNItch findings"
+    success "Layer 3: ${SNITCHED_COUNT} TLS-SAN findings"
 else
-    warn "SNItch not found — skipping layer 3"
-    warn "Install: https://github.com/Un1cornF4rt/SNItch"
+    warn "tlsx not found — skipping layer 3"
+    warn "Install: go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest"
 fi
 
 # ══════════════════════════════════════════════════════════════════

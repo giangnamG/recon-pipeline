@@ -23,10 +23,10 @@ sudo apt install nmap amass
 
 ### Tùy chọn (tăng chất lượng kết quả)
 ```bash
-go install github.com/d3mondev/puredns/v2@latest          # lọc wildcard DNS
-go install github.com/projectdiscovery/katana/cmd/katana@latest  # crawl JS
-cargo install ripgen                                        # permutation vhost
-# SNItch: https://github.com/Un1cornF4rt/SNItch            # SNI-level fuzzing
+go install github.com/d3mondev/puredns/v2@latest                    # lọc wildcard DNS
+go install github.com/projectdiscovery/katana/cmd/katana@latest    # crawl JS
+go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest        # TLS cert SAN extraction
+cargo install ripgen                                                 # permutation vhost
 ```
 
 ### Wordlists (SecLists)
