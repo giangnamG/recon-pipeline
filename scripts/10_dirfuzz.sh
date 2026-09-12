@@ -80,7 +80,7 @@ CUSTOM_URL=""
 CUSTOM_TARGETS=""
 CUSTOM_WORDLIST=""
 # Server-side languages (PHP & variants, Java, ASP.NET, Python, Ruby, Perl, CGI, ColdFusion) + Archives & Backups + Configs & DB dumps
-EXTENSIONS="php,php3,php4,php5,php7,php8,phtml,phar,pht,phps,inc,jsp,jspx,jspf,action,do,class,jar,war,ear,asp,aspx,ashx,asmx,axd,svc,py,rb,pl,cgi,cfm,cfc,zip,tar,tar.gz,tgz,rar,7z,gz,bz2,bak,backup,old,orig,save,swp,tmp,sql,dump,db,sqlite,env,config,conf,cfg,ini,json,xml,yaml,yml,properties,txt,log"
+EXTENSIONS=".php,.php3,.php4,.php5,.php7,.php8,.phtml,.phar,.pht,.phps,.inc,.jsp,.jspx,.jspf,.action,.do,.class,.jar,.war,.ear,.asp,.aspx,.ashx,.asmx,.axd,.svc,.py,.rb,.pl,.cgi,.cfm,.cfc,.zip,.tar,.tar.gz,.tgz,.rar,.7z,.gz,.bz2,.bak,.backup,.old,.orig,.save,.swp,.tmp,.sql,.dump,.db,.sqlite,.env,.config,.conf,.cfg,.ini,.json,.xml,.yaml,.yml,.properties,.txt,.log"
 NO_EXT=0
 THREADS=40
 RATE_LIMIT=150
@@ -105,6 +105,11 @@ while [[ $# -gt 0 ]]; do
         *)                 shift ;;
     esac
 done
+
+# Ensure every extension has a leading dot '.' for ffuf
+if [[ "$NO_EXT" -eq 0 && -n "$EXTENSIONS" ]]; then
+    EXTENSIONS=$(echo "$EXTENSIONS" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | awk 'NF {if ($0 ~ /^\./) print $0; else print "."$0}' | paste -sd, -)
+fi
 
 cmd_exists ffuf || { error "ffuf not found — install: apt install ffuf / go install github.com/ffuf/ffuf/v2@latest"; exit 1; }
 
