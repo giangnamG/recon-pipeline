@@ -28,7 +28,38 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
 
-[[ $# -lt 1 ]] && { usage "$0 <domain>"; exit 1; }
+show_help() {
+    echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${CYAN}║  08 — Target Triage, JS Endpoints & Secret Analysis          ║${RESET}"
+    echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════════╝${RESET}"
+    echo ""
+    echo -e "${BOLD}MÔ TẢ:${RESET}"
+    echo -e "  Phân tích tổng hợp, phân tầng mục tiêu và đào sâu Javascript:"
+    echo -e "  - Tier 1: Các mục tiêu ưu tiên cao nhất (Admin, API, Dev, Staging, CI/CD, Git, Portal)."
+    echo -e "  - Tier 2: Các mục tiêu đáng chú ý (Tech cũ, port lạ, lỗi 4xx/5xx)."
+    echo -e "  - Tier 3: Ứng dụng chính / Standard web."
+    echo -e "  - Trích xuất API Endpoints và Secret tokens/keys trong toàn bộ file JS."
+    echo -e "  - Xuất báo cáo tổng quan Markdown (report.md)."
+    echo ""
+    echo -e "${BOLD}CÚ PHÁP SỬ DỤNG:${RESET}"
+    echo -e "  $0 <domain> [tùy chọn]"
+    echo ""
+    echo -e "${BOLD}CÁC TÙY CHỌN:${RESET}"
+    echo -e "  ${YELLOW}-h, --help${RESET}  Hiển thị hướng dẫn này"
+    echo ""
+    echo -e "${BOLD}VÍ DỤ:${RESET}"
+    echo -e "  $0 mbbank.com.vn"
+    echo ""
+}
+
+[[ $# -eq 0 ]] && { show_help; exit 1; }
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help|help) show_help; exit 0 ;;
+    esac
+done
+
 DOMAIN="$(normalize_domain "$1")"
 
 OUT_DIR="$(output_dir "$DOMAIN")"

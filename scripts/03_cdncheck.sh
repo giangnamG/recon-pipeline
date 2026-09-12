@@ -95,7 +95,35 @@ is_managed_ip() {
     return 1
 }
 
-[[ $# -lt 1 ]] && { usage "$0 <domain>"; exit 1; }
+show_help() {
+    echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${CYAN}║  03 — CDN/WAF Classification & Origin IP Detection           ║${RESET}"
+    echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════════╝${RESET}"
+    echo ""
+    echo -e "${BOLD}MÔ TẢ:${RESET}"
+    echo -e "  Phân tách danh sách IP (all_ips.txt) thành:"
+    echo -e "  - origin_ips.txt: Các IP máy chủ gốc thực sự để tiếp tục quét port."
+    echo -e "  - cdn_ips.txt: Các IP thuộc CDN/WAF (Cloudflare, Akamai, Azure, AWS, Fastly) để bỏ qua."
+    echo ""
+    echo -e "${BOLD}CÚ PHÁP SỬ DỤNG:${RESET}"
+    echo -e "  $0 <domain> [tùy chọn]"
+    echo ""
+    echo -e "${BOLD}CÁC TÙY CHỌN:${RESET}"
+    echo -e "  ${YELLOW}-h, --help${RESET}  Hiển thị hướng dẫn này"
+    echo ""
+    echo -e "${BOLD}VÍ DỤ:${RESET}"
+    echo -e "  $0 mbbank.com.vn"
+    echo ""
+}
+
+[[ $# -eq 0 ]] && { show_help; exit 1; }
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help|help) show_help; exit 0 ;;
+    esac
+done
+
 DOMAIN="$(normalize_domain "$1")"
 
 OUT_DIR="$(output_dir "$DOMAIN")"

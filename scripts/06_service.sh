@@ -17,7 +17,36 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
 
-[[ $# -lt 1 ]] && { usage "$0 <domain>"; exit 1; }
+show_help() {
+    echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${CYAN}║  06 — Service Version Detection & CDN Banner Filter          ║${RESET}"
+    echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════════╝${RESET}"
+    echo ""
+    echo -e "${BOLD}MÔ TẢ:${RESET}"
+    echo -e "  Quét sâu phiên bản dịch vụ và hệ điều hành bằng Nmap (-sV -sC):"
+    echo -e "  - Phân tích chi tiết service, version, protocol trên ports/open.txt."
+    echo -e "  - Nhận diện và lọc các IP CDN/WAF còn sót lại qua banner (Akamai, Cloudflare...)."
+    echo -e "  - Phân loại các service thú vị (DB, Remote, Admin) vào services/interesting.txt."
+    echo ""
+    echo -e "${BOLD}CÚ PHÁP SỬ DỤNG:${RESET}"
+    echo -e "  $0 <domain> [tùy chọn]"
+    echo ""
+    echo -e "${BOLD}CÁC TÙY CHỌN:${RESET}"
+    echo -e "  ${YELLOW}-h, --help${RESET}  Hiển thị hướng dẫn này"
+    echo ""
+    echo -e "${BOLD}VÍ DỤ:${RESET}"
+    echo -e "  $0 mbbank.com.vn"
+    echo ""
+}
+
+[[ $# -eq 0 ]] && { show_help; exit 1; }
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help|help) show_help; exit 0 ;;
+    esac
+done
+
 DOMAIN="$(normalize_domain "$1")"
 
 OUT_DIR="$(output_dir "$DOMAIN")"

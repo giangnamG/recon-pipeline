@@ -23,7 +23,35 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
 
-[[ $# -lt 1 ]] && { usage "$0 <domain>"; exit 1; }
+show_help() {
+    echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${CYAN}║  07 — HTTP Probing & Tech Stack Detection                    ║${RESET}"
+    echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════════╝${RESET}"
+    echo ""
+    echo -e "${BOLD}MÔ TẢ:${RESET}"
+    echo -e "  Dò quét toàn diện danh sách URL ứng viên (ports/candidate_urls.txt) bằng httpx."
+    echo -e "  Thu thập Title, HTTP status code, Server Banner, Tech stack, Favicon hash, TLS info"
+    echo -e "  và phân loại thành live.txt, dead.txt, interesting.txt, all.json."
+    echo ""
+    echo -e "${BOLD}CÚ PHÁP SỬ DỤNG:${RESET}"
+    echo -e "  $0 <domain> [tùy chọn]"
+    echo ""
+    echo -e "${BOLD}CÁC TÙY CHỌN:${RESET}"
+    echo -e "  ${YELLOW}-h, --help${RESET}  Hiển thị hướng dẫn này"
+    echo ""
+    echo -e "${BOLD}VÍ DỤ:${RESET}"
+    echo -e "  $0 mbbank.com.vn"
+    echo ""
+}
+
+[[ $# -eq 0 ]] && { show_help; exit 1; }
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help|help) show_help; exit 0 ;;
+    esac
+done
+
 DOMAIN="$(normalize_domain "$1")"
 
 OUT_DIR="$(output_dir "$DOMAIN")"

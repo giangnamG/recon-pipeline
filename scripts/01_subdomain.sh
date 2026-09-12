@@ -20,8 +20,35 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
 
-# ─── Args ────────────────────────────────────────────────────────────────────
-[[ $# -lt 1 ]] && { usage "$0 <domain>"; exit 1; }
+show_help() {
+    echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${CYAN}║  01 — Subdomain Enumeration (Passive + Active)               ║${RESET}"
+    echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════════╝${RESET}"
+    echo ""
+    echo -e "${BOLD}MÔ TẢ:${RESET}"
+    echo -e "  Thu thập tên miền phụ (Subdomain) toàn diện:"
+    echo -e "  - Passive: subfinder (50+ APIs), amass, crt.sh, certspotter."
+    echo -e "  - Active: gobuster dns brute-force qua 6 tầng wordlist đa cấp."
+    echo ""
+    echo -e "${BOLD}CÚ PHÁP SỬ DỤNG:${RESET}"
+    echo -e "  $0 <domain> [tùy chọn]"
+    echo ""
+    echo -e "${BOLD}CÁC TÙY CHỌN:${RESET}"
+    echo -e "  ${YELLOW}-h, --help${RESET}  Hiển thị hướng dẫn này"
+    echo ""
+    echo -e "${BOLD}VÍ DỤ:${RESET}"
+    echo -e "  $0 mbbank.com.vn"
+    echo ""
+}
+
+[[ $# -eq 0 ]] && { show_help; exit 1; }
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help|help) show_help; exit 0 ;;
+    esac
+done
+
 DOMAIN="$(normalize_domain "$1")"
 
 OUT_DIR="$(output_dir "$DOMAIN")"

@@ -34,7 +34,40 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
 
-[[ $# -lt 1 ]] && { usage "$0 <domain>"; exit 1; }
+show_help() {
+    echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${CYAN}║  05 — Port Scanning & Service Fingerprinting                 ║${RESET}"
+    echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════════╝${RESET}"
+    echo ""
+    echo -e "${BOLD}MÔ TẢ:${RESET}"
+    echo -e "  Quét toàn bộ cổng mở và nhận diện Active Fingerprint dịch vụ (SSL Certificate,"
+    echo -e "  HTTP status code, Web Title, Framework, Banner, CVE) trên toàn bộ Origin IPs."
+    echo ""
+    echo -e "${BOLD}CÚ PHÁP SỬ DỤNG:${RESET}"
+    echo -e "  $0 <domain> [tùy chọn]"
+    echo ""
+    echo -e "${BOLD}CÁC TÙY CHỌN:${RESET}"
+    echo -e "  ${YELLOW}--tool <gogo|naabu|nmap>${RESET}  Công cụ ưu tiên sử dụng (Mặc định: gogo)"
+    echo -e "  ${YELLOW}--ports <ports>${RESET}           Dải port hoặc port tags tùy chỉnh (Mặc định: 80+ tags của gogo)"
+    echo -e "  ${YELLOW}--all-ports${RESET}               Quét toàn bộ dải 1-65535 (chậm, dùng khi cần scan sâu)"
+    echo -e "  ${YELLOW}--skip-cdn-check${RESET}          Quét cả các IP CDN (không khuyến nghị)"
+    echo -e "  ${YELLOW}-h, --help${RESET}                Hiển thị hướng dẫn này"
+    echo ""
+    echo -e "${BOLD}VÍ DỤ:${RESET}"
+    echo -e "  $0 mbbank.com.vn"
+    echo -e "  $0 mbbank.com.vn --tool naabu"
+    echo -e "  $0 mbbank.com.vn --all-ports"
+    echo ""
+}
+
+[[ $# -eq 0 ]] && { show_help; exit 1; }
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help|help) show_help; exit 0 ;;
+    esac
+done
+
 DOMAIN="$(normalize_domain "$1")"
 
 OUT_DIR="$(output_dir "$DOMAIN")"

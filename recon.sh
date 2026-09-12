@@ -25,6 +25,18 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 
+PIPELINE_STEPS=(
+    "01:01_subdomain.sh:Subdomain Enumeration"
+    "02:02_resolve.sh:DNS Resolution"
+    "03:03_cdncheck.sh:CDN/WAF Classification"
+    "04:04_vhost.sh:Virtual Host Discovery"
+    "05:05_portscan.sh:Port Scanning"
+    "06:06_service.sh:Service Detection"
+    "07:07_httpx.sh:HTTP Probing"
+    "08:08_triage.sh:Triage & JS Analysis"
+    "09:09_nuclei.sh:Nuclei Vulnerability Scan"
+)
+
 show_help() {
     echo -e "${BOLD}${CYAN}"
     cat << 'SPLASH'
@@ -44,7 +56,7 @@ SPLASH
     echo -e "${BOLD}TÙY CHỌN:${RESET}"
     echo -e "  ${YELLOW}--only <bước>${RESET}     Chỉ chạy duy nhất 1 bước (ví dụ: --only 05 hoặc --only 5)"
     echo -e "  ${YELLOW}--from <bước>${RESET}     Bắt đầu chạy từ bước chỉ định đến hết (ví dụ: --from 03)"
-    echo -e "  ${YELLOW}-h, --help${RESET}        Hiển thị hướng dẫn này"
+    echo -e "  ${YELLOW}-h, --help${RESET}        Hiển thị hướng dẫn tổng quan (hoặc kết hợp với --only để xem helper từng bước)"
     echo ""
     echo -e "${BOLD}DANH SÁCH CÁC BƯỚC TRONG PIPELINE:${RESET}"
     echo -e "  ${GREEN}01${RESET} | ${CYAN}01_subdomain.sh${RESET}  : Thu thập subdomain (Passive: subfinder/crt.sh + Active: puredns/alterx/tls)"
@@ -66,13 +78,12 @@ SPLASH
     echo -e "     $0 mbbank.com.vn --only 07       # Chỉ probe HTTP"
     echo -e "     $0 mbbank.com.vn --only 09       # Chỉ quét nuclei"
     echo ""
-    echo -e "  ${BOLD}3. Chạy tiếp tục từ 1 bước cụ thể:${RESET}"
-    echo -e "     $0 mbbank.com.vn --from 03       # Bỏ qua bước 01, 02 và chạy từ 03 đến hết"
+    echo -e "  ${BOLD}3. Xem helper của từng bước cụ thể:${RESET}"
+    echo -e "     $0 --only 05 --help              # Xem chi tiết options của bước 05"
+    echo -e "     $0 --only 09 --help              # Xem chi tiết options của bước 09 (nuclei)"
     echo ""
-    echo -e "  ${BOLD}4. Chạy trực tiếp script đơn lẻ (với tham số nâng cao riêng):${RESET}"
-    echo -e "     ./scripts/05_portscan.sh mbbank.com.vn --all-ports"
-    echo -e "     ./scripts/09_nuclei.sh mbbank.com.vn --tech tomcat"
-    echo -e "     ./scripts/09_nuclei.sh mbbank.com.vn --cve"
+    echo -e "  ${BOLD}4. Chạy tiếp tục từ 1 bước cụ thể:${RESET}"
+    echo -e "     $0 mbbank.com.vn --from 03       # Bỏ qua bước 01, 02 và chạy từ 03 đến hết"
     echo ""
 }
 
@@ -80,14 +91,15 @@ SPLASH
 DOMAIN=""
 FROM_STEP=1
 ONLY_STEP=""
+HELP_REQUESTED=0
 
 [[ $# -eq 0 ]] && { show_help; exit 1; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help|help)
-            show_help
-            exit 0
+            HELP_REQUESTED=1
+            shift
             ;;
         --from)
             FROM_STEP="$(echo "${2:-1}" | tr -dc '0-9')"
@@ -114,6 +126,30 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ "$HELP_REQUESTED" -eq 1 ]]; then
+    if [[ -n "$ONLY_STEP" ]]; then
+        PADDED_STEP=$(printf '%02d' "$(( 10#${ONLY_STEP} ))")
+        MATCHED_SCRIPT=""
+        for entry in "${PIPELINE_STEPS[@]}"; do
+            IFS=':' read -r step_num script_file step_name <<< "$entry"
+            if [[ "$step_num" == "$PADDED_STEP" ]]; then
+                MATCHED_SCRIPT="${SCRIPT_DIR}/scripts/${script_file}"
+                break
+            fi
+        done
+        if [[ -n "$MATCHED_SCRIPT" && -f "$MATCHED_SCRIPT" ]]; then
+            bash "$MATCHED_SCRIPT" --help
+            exit 0
+        else
+            echo -e "${RED}[-]${RESET} Không tìm thấy script cho bước: ${ONLY_STEP}" >&2
+            exit 1
+        fi
+    else
+        show_help
+        exit 0
+    fi
+fi
+
 if [[ -z "$DOMAIN" ]]; then
     show_help
     exit 1
@@ -125,18 +161,6 @@ MASTER_LOG="${OUT_DIR}/logs/recon.log"
 mkdir -p "${OUT_DIR}/logs"
 
 exec > >(tee -a "$MASTER_LOG") 2>&1
-
-PIPELINE_STEPS=(
-    "01:01_subdomain.sh:Subdomain Enumeration"
-    "02:02_resolve.sh:DNS Resolution"
-    "03:03_cdncheck.sh:CDN/WAF Classification"
-    "04:04_vhost.sh:Virtual Host Discovery"
-    "05:05_portscan.sh:Port Scanning"
-    "06:06_service.sh:Service Detection"
-    "07:07_httpx.sh:HTTP Probing"
-    "08:08_triage.sh:Triage & JS Analysis"
-    "09:09_nuclei.sh:Nuclei Vulnerability Scan"
-)
 
 # ─── Splash ───────────────────────────────────────────────────────────────────
 echo -e "${BOLD}${CYAN}"

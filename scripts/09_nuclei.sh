@@ -48,7 +48,49 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
 
-[[ $# -lt 1 ]] && { usage "$0 <domain> [--tech] [--cve] [--network] [--severity critical,high,medium] [--rate N] [--ai-templates]"; exit 1; }
+show_help() {
+    echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${CYAN}║  09 — Nuclei Vulnerability Scanning                          ║${RESET}"
+    echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════════╝${RESET}"
+    echo ""
+    echo -e "${BOLD}MÔ TẢ:${RESET}"
+    echo -e "  Quét lỗ hổng bảo mật chuyên sâu bằng Nuclei theo 3 nhóm chiến lược:"
+    echo -e "  1. Tech-aware: Tự chọn bộ template khớp với công nghệ phát hiện được từ httpx."
+    echo -e "  2. Broad CVE & Exposure: Quét CVE (2020-2025), lộ file/config, misconfiguration."
+    echo -e "  3. Network Scan: Quét các lỗ hổng dịch vụ tầng mạng (Redis, Mongo, SMB, v.v.)."
+    echo ""
+    echo -e "${BOLD}CÚ PHÁP SỬ DỤNG:${RESET}"
+    echo -e "  $0 <domain> [tùy chọn]"
+    echo ""
+    echo -e "${BOLD}CÁC TÙY CHỌN PHA QUÉT (Scan Modes):${RESET}"
+    echo -e "  ${YELLOW}--tech${RESET}                 Chạy Pha 1: Tech-aware scan (tomcat, nginx, f5, iis, spring, v.v.)"
+    echo -e "  ${YELLOW}--cve${RESET}                  Chạy Pha 2: Broad CVE, Exposure & Misconfig sweep"
+    echo -e "  ${YELLOW}--network${RESET}              Chạy Pha 3: Network-level scan trên Origin IPs"
+    echo -e "  ${YELLOW}--all${RESET}                  Chạy toàn bộ cả 3 pha (Mặc định nếu không truyền cờ pha)"
+    echo ""
+    echo -e "${BOLD}CÁC TÙY CHỌN ĐIỀU KHIỂN & TỐI ƯU:${RESET}"
+    echo -e "  ${YELLOW}--severity <list>${RESET}      Mức độ nghiêm trọng (Mặc định: critical,high,medium)"
+    echo -e "  ${YELLOW}--rate <N>${RESET}             Giới hạn request/giây (Mặc định: 50)"
+    echo -e "  ${YELLOW}--concurrency <N>${RESET}      Số target quét song song (Mặc định: 10)"
+    echo -e "  ${YELLOW}--ai-templates${RESET}         Bật thêm bộ templates do AI tạo (unverified)"
+    echo -e "  ${YELLOW}-h, --help${RESET}             Hiển thị hướng dẫn này"
+    echo ""
+    echo -e "${BOLD}VÍ DỤ:${RESET}"
+    echo -e "  $0 mbbank.com.vn"
+    echo -e "  $0 mbbank.com.vn --tech"
+    echo -e "  $0 mbbank.com.vn --cve --severity critical,high"
+    echo -e "  $0 mbbank.com.vn --network"
+    echo ""
+}
+
+[[ $# -eq 0 ]] && { show_help; exit 1; }
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help|help) show_help; exit 0 ;;
+    esac
+done
+
 DOMAIN="$(normalize_domain "$1")"
 
 # ─── Options ─────────────────────────────────────────────────────────────────
