@@ -127,14 +127,13 @@ IN_LIVE="${OUT_DIR}/http/live.txt"
 OUT_DISCOVERED="${FUZZ_DIR}/discovered_paths.txt"
 OUT_SENSITIVE="${FUZZ_DIR}/sensitive_files.txt"
 OUT_ADMIN="${FUZZ_DIR}/admin_panels.txt"
-OUT_ALL_JSON="${FUZZ_DIR}/all.json"
 LOG_FILE="${OUT_DIR}/logs/10_dirfuzz.log"
 TEMP_DIR="$(mktemp -d)"; trap 'rm -rf "$TEMP_DIR"' EXIT
 
 mkdir -p "${OUT_DIR}/logs"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-> "$OUT_DISCOVERED"; > "$OUT_SENSITIVE"; > "$OUT_ADMIN"; > "$OUT_ALL_JSON"
+touch "$OUT_DISCOVERED" "$OUT_SENSITIVE" "$OUT_ADMIN"
 
 banner "10 — Directory & Content Fuzzing" "$DOMAIN"
 
@@ -350,9 +349,9 @@ done < "$TARGETS_FILE"
 wait
 
 # ──────────────────────────────────────────────
-# 5. Parse, Classify & Consolidate Results
+# 5. Parse, Classify & Consolidate Results (Append & Merge)
 # ──────────────────────────────────────────────
-step "Parsing & classifying discovered paths"
+step "Parsing & classifying discovered paths (Append & Merge mode)"
 
 RAW_DIR="$RAW_DIR" OUT_DISCOVERED="$OUT_DISCOVERED" OUT_SENSITIVE="$OUT_SENSITIVE" OUT_ADMIN="$OUT_ADMIN" OUT_ALL_JSON="$OUT_ALL_JSON" python3 - << 'PYEOF'
 import json
@@ -384,6 +383,31 @@ discovered_lines = []
 sensitive_lines = []
 admin_lines = []
 
+# 1. Load pre-existing findings if available (Preserve previous runs)
+if os.path.exists(out_discovered):
+    with open(out_discovered, "r", encoding="utf-8", errors="ignore") as f:
+        discovered_lines = [line.strip() for line in f if line.strip()]
+
+if os.path.exists(out_sensitive):
+    with open(out_sensitive, "r", encoding="utf-8", errors="ignore") as f:
+        sensitive_lines = [line.strip() for line in f if line.strip()]
+
+if os.path.exists(out_admin):
+    with open(out_admin, "r", encoding="utf-8", errors="ignore") as f:
+        admin_lines = [line.strip() for line in f if line.strip()]
+
+if os.path.exists(out_all_json):
+    try:
+        with open(out_all_json, "r", encoding="utf-8", errors="ignore") as f:
+            loaded_json = json.load(f)
+            if isinstance(loaded_json, list):
+                all_results = loaded_json
+    except Exception:
+        all_results = []
+
+# 2. Parse all raw JSONs from ffuf
+seen_urls = {res.get("url") for res in all_results if isinstance(res, dict) and res.get("url")}
+
 for json_file in glob.glob(os.path.join(raw_dir, "*.json")):
     try:
         with open(json_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -391,6 +415,8 @@ for json_file in glob.glob(os.path.join(raw_dir, "*.json")):
             results = data.get("results", [])
             for res in results:
                 url = res.get("url", "")
+                if not url:
+                    continue
                 status = res.get("status", 0)
                 length = res.get("length", 0)
                 words = res.get("words", 0)
@@ -402,7 +428,9 @@ for json_file in glob.glob(os.path.join(raw_dir, "*.json")):
                     info_str += f" -> {redirect}"
 
                 discovered_lines.append(info_str)
-                all_results.append(res)
+                if url not in seen_urls:
+                    all_results.append(res)
+                    seen_urls.add(url)
 
                 # Check sensitive
                 url_lower = url.lower()
@@ -416,7 +444,7 @@ for json_file in glob.glob(os.path.join(raw_dir, "*.json")):
     except Exception as e:
         continue
 
-# Sort and deduplicate
+# 3. Deduplicate and sort
 discovered_lines = sorted(list(set(discovered_lines)))
 sensitive_lines = sorted(list(set(sensitive_lines)))
 admin_lines = sorted(list(set(admin_lines)))

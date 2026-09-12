@@ -95,6 +95,7 @@ DOMAIN=""
 FROM_STEP=1
 ONLY_STEP=""
 HELP_REQUESTED=0
+EXTRA_ARGS=()
 
 [[ $# -eq 0 ]] && { show_help; exit 1; }
 
@@ -113,16 +114,16 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -*)
-            echo -e "${RED}[-]${RESET} Unknown option: $1" >&2
-            echo -e "Sử dụng ${YELLOW}$0 --help${RESET} để xem hướng dẫn chi tiết." >&2
-            exit 1
+            EXTRA_ARGS+=("$1")
+            shift
             ;;
         *)
-            if [[ -z "$DOMAIN" ]]; then
+            if [[ -z "$DOMAIN" && ! "$1" =~ ^https?:// && "$1" =~ ^[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}$ ]]; then
+                DOMAIN="$(normalize_domain "$1")"
+            elif [[ -z "$DOMAIN" && ${#EXTRA_ARGS[@]} -eq 0 ]]; then
                 DOMAIN="$(normalize_domain "$1")"
             else
-                echo -e "${RED}[-]${RESET} Unexpected argument: $1" >&2
-                exit 1
+                EXTRA_ARGS+=("$1")
             fi
             shift
             ;;
@@ -244,7 +245,7 @@ for entry in "${PIPELINE_STEPS[@]}"; do
 
     STEP_START=$(date +%s)
 
-    if (cd "${SCRIPT_DIR}/scripts" && bash "$SCRIPT_PATH" "$DOMAIN"); then
+    if (cd "${SCRIPT_DIR}/scripts" && bash "$SCRIPT_PATH" "$DOMAIN" "${EXTRA_ARGS[@]}"); then
         STEP_END=$(date +%s)
         STEP_ELAPSED=$(( STEP_END - STEP_START ))
         STEP_FMT=$(printf '%02d:%02d' $((STEP_ELAPSED/60)) $((STEP_ELAPSED%60)))
