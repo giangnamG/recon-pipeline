@@ -155,7 +155,7 @@ IP bị loại trước khi vào `origin_ips.txt`:
 
 ### `04_vhost.sh` — Hostname pattern filter
 
-Skip cứng trước khi verify (Microsoft-managed service, không thể là infra của target):
+**SKIP_HOST_PATTERNS** — skip trước khi verify, áp dụng cho mọi layer:
 
 | Pattern | Lý do |
 |---------|-------|
@@ -165,6 +165,33 @@ Skip cứng trước khi verify (Microsoft-managed service, không thể là inf
 | `^lyncdiscover\.` | Microsoft Skype for Business |
 
 `autodiscover`, `sip` **không** bị skip vì target có thể tự host Exchange/SIP server.
+
+**PTR_SKIP_PATTERNS** — chỉ áp dụng cho Layer 0/1c (PTR candidates):
+
+| Pattern | Lý do |
+|---------|-------|
+| `^mx[0-9]*\.` | Mail exchanger — SMTP response khác random host → baseline-diff FP |
+| `^mail[0-9]*\.` | Mail server |
+| `^smtp[0-9]*\.` | SMTP relay |
+| `^pop[0-9]*\.` | POP3 server |
+| `^imap[0-9]*\.` | IMAP server |
+
+**Tại sao mail server gây FP?** Server SMTP trả về banner/redirect page khác hẳn với random hostname (không có vhost) → `md5(body_mx1) ≠ md5(body_random)` → baseline-diff pass → false positive. Thực tế mx1 không phải web vhost trên những IP đó.
+
+### Layer 1c — chỉ verify trên IP thực của PTR host
+
+Trước đây: cross-product toàn bộ `origin_ips.txt` → N IP × 2 proto FP entries mỗi PTR host.
+
+Sau fix:
+1. `dig A <ptr_host>` → lấy IP thực
+2. Nếu IP thuộc `origin_ips.txt` → chỉ verify trên đúng IP đó
+3. Nếu không resolve (hidden hostname) → cross-product toàn bộ origin IPs (đây mới là trường hợp cần cross-product)
+
+### Dedup verified.txt — dedup theo (host, ip) pair
+
+Trước đây: `awk '!seen[$1]++'` dedup theo hostname → bỏ mất load balancer IPs.
+
+Ví dụ: `api-app-az.mbbank.com.vn → 18.138.177.90` và `api-app-az.mbbank.com.vn → 18.143.57.25` — cả 2 đều hợp lệ (multi-IP deployment), chỉ bỏ khi cùng `(host, ip)` có cả https lẫn http.
 
 ---
 

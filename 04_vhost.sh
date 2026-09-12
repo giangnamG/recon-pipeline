@@ -100,9 +100,28 @@ SKIP_HOST_PATTERNS=(
     "^lyncdiscover\."              # Microsoft Skype for Business — always msft
 )
 
+# PTR candidates từ mail/SMTP server sẽ verify thành công trên mọi IP
+# vì server trả về trang SMTP-redirect khác random host → baseline-diff FP.
+# Filter bỏ trước khi cross-product với origin_ips.
+PTR_SKIP_PATTERNS=(
+    "^mx[0-9]*\."      # mail exchanger
+    "^mail[0-9]*\."    # mail server
+    "^smtp[0-9]*\."    # SMTP relay
+    "^pop[0-9]*\."     # POP3
+    "^imap[0-9]*\."    # IMAP
+)
+
 is_skip_host() {
     local host="$1"
     for pat in "${SKIP_HOST_PATTERNS[@]}"; do
+        echo "$host" | grep -qE "$pat" && return 0
+    done
+    return 1
+}
+
+is_ptr_skip_host() {
+    local host="$1"
+    for pat in "${PTR_SKIP_PATTERNS[@]}"; do
         echo "$host" | grep -qE "$pat" && return 0
     done
     return 1
@@ -219,13 +238,26 @@ while IFS= read -r ip; do
 done < "$IN_ORIGIN_IPS"
 
 sort -u "$PTR_CANDIDATES" -o "$PTR_CANDIDATES"
+
+# Filter luôn tại đây để count chính xác
+PTR_FILTERED="${TEMP_DIR}/ptr_filtered.txt"
+> "$PTR_FILTERED"
+while IFS= read -r h; do
+    if is_ptr_skip_host "$h"; then
+        info "  PTR SKIP  ${h}  (mail/SMTP — sẽ FP trên baseline-diff)"
+    else
+        echo "$h" >> "$PTR_FILTERED"
+    fi
+done < "$PTR_CANDIDATES"
+cp "$PTR_FILTERED" "$PTR_CANDIDATES"
+
 PTR_COUNT=$(count_lines "$PTR_CANDIDATES")
 
 if [[ "$PTR_COUNT" -gt 0 ]]; then
-    info "PTR: ${PTR_COUNT} hostname candidates từ ${ORIGIN_COUNT} IPs"
+    info "PTR: ${PTR_COUNT} hostname candidates từ ${ORIGIN_COUNT} IPs (sau khi filter)"
     while IFS= read -r h; do info "  → $h"; done < "$PTR_CANDIDATES"
 else
-    info "PTR: không tìm được hostname mới từ ${ORIGIN_COUNT} IPs"
+    info "PTR: không tìm được hostname mới từ ${ORIGIN_COUNT} IPs (sau khi filter)"
 fi
 
 # ══════════════════════════════════════════════════════════════════
@@ -253,9 +285,11 @@ done < "$IN_RESOLVED"
 L1A_TOTAL=$(wc -l < "$L1A_TASKS" 2>/dev/null || echo 0)
 run_parallel_l1 "$L1A_TASKS" "$L1A_TOTAL" "1a"
 
-# Dedup 1a: cùng host → giữ https ưu tiên (sort tab-sep col3 reverse → https < http → first-seen wins)
-sort -t$'\t' -k1,1 -k3,3r "$OUT_VERIFIED" \
-    | awk -F'\t' '!seen[$1]++' \
+# Dedup 1a: cùng (host, ip) pair → giữ https ưu tiên
+# Load balancer thật sự có nhiều IPs → giữ mọi (host, ip) unique
+# Chỉ dedup khi cùng (host, ip) có cả https lẫn http → bỏ http
+sort -t$'\t' -k1,1 -k2,2 -k3,3r "$OUT_VERIFIED" \
+    | awk -F'\t' '!seen[$1"\t"$2]++' \
     > "${TEMP_DIR}/verified_dedup.txt" 2>/dev/null || true
 [[ -s "${TEMP_DIR}/verified_dedup.txt" ]] && cp "${TEMP_DIR}/verified_dedup.txt" "$OUT_VERIFIED"
 
@@ -280,9 +314,14 @@ if [[ "$UNRESOLVED_COUNT" -gt 0 && "$ORIGIN_COUNT" -gt 0 ]]; then
     run_parallel_l1 "$L1B_TASKS" "$CROSS_TOTAL" "1b"
 fi
 
-# 1c: PTR candidates × origin IPs
+# 1c: PTR candidates — chỉ verify trên IP mà host thực sự resolve về
+# Lý do: PTR từ IP → hostname, nhưng hostname có thể resolve về IP khác
+# (mail server mx1 resolve về dedicated mail IP, không phải web IP).
+# Cross-product toàn bộ origin_ips → FP vì mx server trả trang khác random host.
+# Logic đúng: dig A <ptr_host> → lấy IP → nếu IP đó trong origin_ips thì verify.
+# Fallback: nếu không resolve → thử cross-product (hostname thực sự hidden).
 if [[ "$PTR_COUNT" -gt 0 ]]; then
-    info "1c — PTR candidates verification (parallel)..."
+    info "1c — PTR candidates verification (chỉ test trên IP thực)..."
     L1C_TASKS="${TEMP_DIR}/l1c_tasks.txt"
     > "$L1C_TASKS"
     while IFS= read -r host; do
@@ -291,21 +330,46 @@ if [[ "$PTR_COUNT" -gt 0 ]]; then
             info "  SKIP  ${host}  (managed service)"
             continue
         fi
+        # Filter mail server — baseline-diff FP vì SMTP response khác random host
+        if is_ptr_skip_host "$host"; then
+            info "  SKIP  ${host}  (mail/SMTP server — PTR FP risk)"
+            continue
+        fi
         # Skip nếu đã verified ở 1a
         grep -qP "^${host}\t" "$OUT_VERIFIED" 2>/dev/null && continue
-        while IFS= read -r ip; do
-            [[ -z "$ip" ]] && continue
-            printf '%s %s https ptr-lookup\n' "$ip" "$host" >> "$L1C_TASKS"
-            printf '%s %s http  ptr-lookup\n' "$ip" "$host" >> "$L1C_TASKS"
-        done < "$IN_ORIGIN_IPS"
+
+        # Resolve forward: lấy IP thực của PTR host
+        PTR_REAL_IPS=$(dig +short +time=2 +tries=1 A "$host" 2>/dev/null \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
+
+        if [[ -n "$PTR_REAL_IPS" ]]; then
+            # Có forward DNS → chỉ test trên IP thuộc origin_ips
+            while IFS= read -r resolved_ip; do
+                grep -qxF "$resolved_ip" "$IN_ORIGIN_IPS" 2>/dev/null || continue
+                printf '%s %s https ptr-lookup\n' "$resolved_ip" "$host" >> "$L1C_TASKS"
+                printf '%s %s http  ptr-lookup\n' "$resolved_ip" "$host" >> "$L1C_TASKS"
+            done <<< "$PTR_REAL_IPS"
+        else
+            # Không resolve → hidden hostname, thử cross-product toàn bộ origin_ips
+            info "  ${host}: không resolve → cross-product origin IPs"
+            while IFS= read -r ip; do
+                [[ -z "$ip" ]] && continue
+                printf '%s %s https ptr-lookup\n' "$ip" "$host" >> "$L1C_TASKS"
+                printf '%s %s http  ptr-lookup\n' "$ip" "$host" >> "$L1C_TASKS"
+            done < "$IN_ORIGIN_IPS"
+        fi
     done < "$PTR_CANDIDATES"
     L1C_TOTAL=$(wc -l < "$L1C_TASKS" 2>/dev/null || echo 0)
-    run_parallel_l1 "$L1C_TASKS" "$L1C_TOTAL" "1c"
+    if [[ "$L1C_TOTAL" -gt 0 ]]; then
+        run_parallel_l1 "$L1C_TASKS" "$L1C_TOTAL" "1c"
+    else
+        info "1c: không có task nào sau khi filter (tất cả PTR đã skip hoặc resolve về non-origin IP)"
+    fi
 fi
 
-# Dedup toàn bộ verified.txt: cùng host → giữ https ưu tiên
-sort -t$'\t' -k1,1 -k3,3r "$OUT_VERIFIED" \
-    | awk -F'\t' '!seen[$1]++' \
+# Dedup toàn bộ verified.txt: cùng (host, ip) pair → giữ https ưu tiên
+sort -t$'\t' -k1,1 -k2,2 -k3,3r "$OUT_VERIFIED" \
+    | awk -F'\t' '!seen[$1"\t"$2]++' \
     > "${TEMP_DIR}/verified_final.txt" 2>/dev/null || true
 [[ -s "${TEMP_DIR}/verified_final.txt" ]] && cp "${TEMP_DIR}/verified_final.txt" "$OUT_VERIFIED"
 
