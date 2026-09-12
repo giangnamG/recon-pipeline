@@ -18,29 +18,37 @@
 # OUTPUT: output/<domain>/ports/open.txt        — ip:port
 #         output/<domain>/ports/closed_ips.txt  — IPs with no open ports
 #         output/<domain>/ports/web.txt         — web ports only
-#         output/<domain>/ports/probe_urls.txt  — candidate URLs for HTTP probing (http(s)://subdomain:port + ip:port)
-#         output/<domain>/ports/gogo.json       — gogo full JSON (nếu dùng gogo)
-#         output/<domain>/ports/fingerprint.txt — service fingerprint từ gogo
-# =============================================================================
+#         output/<domain>/ports/candidate_urls.txt  — candidate URLs for HTTP probing (http(s)://subdomain:port + ip:port)
+#
+# Usage:
+#   ./scripts/05_portscan.sh <domain> [options]
+#   Options:
+#     --tool gogo|naabu|nmap   Tool ưu tiên (default: gogo)
+#     --ports <ports>          Port range (default: top1000)
+#     --all-ports              Scan 1-65535 (chậm, dùng khi cần sâu)
+#     --skip-cdn-check         Scan cả CDN IPs (không khuyến nghị)
+# -----------------------------------------------------------------------------
 
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
 
-[[ $# -lt 1 ]] && { usage "$0 <domain>"; exit 1; }
-DOMAIN="$(normalize_domain "$1")"
+require_target "$@"
+TARGET="$1"; shift || true
+DOMAIN="$TARGET"
 
-OUT_DIR="$(output_dir "$DOMAIN")"
+OUT_DIR="$(get_target_dir "$TARGET")"
 PORT_DIR="${OUT_DIR}/ports"
 mkdir -p "$PORT_DIR"
 
-IN_IPS="${OUT_DIR}/origin_ips.txt"
-IN_RESOLVED="${OUT_DIR}/resolved.txt"
+IN_ORIGIN="${OUT_DIR}/cdn/origin_ips.txt"
+IN_IPS="$IN_ORIGIN"
+IN_RESOLVED="${OUT_DIR}/subdomains/resolved.txt"
+
 OUT_OPEN="${PORT_DIR}/open.txt"
 OUT_CLOSED="${PORT_DIR}/closed_ips.txt"
-OUT_WEB="${PORT_DIR}/web.txt"
-OUT_URLS="${PORT_DIR}/probe_urls.txt"
+OUT_URLS="${PORT_DIR}/candidate_urls.txt"
 OUT_GOGO_JSON="${PORT_DIR}/gogo.json"
 OUT_FINGERPRINT="${PORT_DIR}/fingerprint.txt"
 LOG_FILE="${OUT_DIR}/logs/05_portscan.log"
@@ -281,7 +289,7 @@ summary_box "05 PORT SCAN" \
     "Closed/Filtered IPs" "$CLOSED_IPS_COUNT (→ ports/closed_ips.txt)" \
     "Open ports" "$(count_lines "$OUT_OPEN") ip:port" \
     "Web ports" "$(count_lines "$OUT_WEB")" \
-    "Probe URLs" "$(count_lines "$OUT_URLS") (→ ports/probe_urls.txt)" \
+    "Candidate URLs" "$(count_lines "$OUT_URLS") (→ ports/candidate_urls.txt)" \
     "Fingerprints" "$FP_COUNT (from gogo)" \
     "Elapsed" "$ELAPSED_FMT" \
     "Next" "06_service.sh $DOMAIN"

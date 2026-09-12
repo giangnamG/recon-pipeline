@@ -124,7 +124,7 @@ output/example.com/
 │   ├── open.txt            # ip:port đang mở
 │   ├── closed_ips.txt      # IP không mở cổng nào (đóng hoặc bị firewall filter)
 │   ├── web.txt             # Danh sách port mở chuyển tiếp
-│   └── probe_urls.txt      # URL ứng viên để probe (http(s)://subdomain:port + ip:port)
+│   └── candidate_urls.txt  # URL ứng viên để probe (http(s)://subdomain:port + ip:port)
 ├── services/
 │   ├── parsed.txt          # ip:port service version
 │   ├── interesting.txt     # Service đáng chú ý
@@ -174,7 +174,7 @@ subdomains.txt
       ↓
   [04] vhost → vhosts/all_vhosts.txt
       ↓
-  [05] portscan → ports/open.txt + closed_ips.txt + probe_urls.txt
+  [05] portscan → ports/open.txt + closed_ips.txt + candidate_urls.txt
       ↓
   [06] service → services/parsed.txt (+ lọc CDN banner)
       ↓
