@@ -194,229 +194,25 @@ subdomains.txt
 
 ## setup_templates.sh — Quản lý nuclei templates
 
-### Sử dụng
+Xem tài liệu đầy đủ: [docs/setup_templates.md](docs/setup_templates.md)
 
+Thiết lập nhanh:
 ```bash
-# Lần đầu thiết lập
-./setup_templates.sh --init          # tạo /opt/nuclei-pipeline + chown (cần sudo)
-./setup_templates.sh --tier 2        # tải ~158k templates về disk
-
-# Cập nhật
-./setup_templates.sh --tier 2        # update tất cả Tier 2 (recommended)
-./setup_templates.sh --source B      # chỉ update một source (vd: Wordfence daily)
-
-# Kiểm tra
-./setup_templates.sh                 # help + trạng thái hiện tại
-./setup_templates.sh --list          # đếm templates từng source + category breakdown
-./setup_templates.sh --status        # health check: disk usage, tuổi, outdated
-./setup_templates.sh --check         # xem updates có sẵn mà không pull
-
-# Quản lý
-./setup_templates.sh --remove F      # xóa một source (hỏi xác nhận)
-./setup_templates.sh --validate      # lint tất cả templates (nuclei -validate)
-```
-
-### Input
-
-Không có input file — script tự kết nối GitHub để clone/pull các repo template.
-
-Cần có:
-- `git` trong PATH
-- Kết nối internet ra `github.com`
-- Quyền ghi vào `/opt/` (hoặc dùng `--init` để setup) — nếu không có thì fallback tự động sang `~/nuclei-pipeline/`
-
-### Cơ chế hoạt động
-
-**Storage:** Templates lưu trên Linux filesystem (`/opt/nuclei-pipeline/` hoặc `~/nuclei-pipeline/`), **không** trên NTFS/WSL mount để tránh lỗi `git chmod`. Có thể override bằng `export NUCLEI_TEMPLATES_DIR=/path/to/dir`.
-
-**Clone/Update:** Mỗi source được `git clone --depth=1` lần đầu, sau đó `git pull --ff-only` mỗi lần chạy lại. Có spinner hiển thị progress và kiểm tra disk space trước khi clone (Wordfence yêu cầu ~350MB free).
-
-**Tiering:** Sources được phân 3 tier theo chất lượng và use-case:
-
-| Tier | Sources | Templates | Ghi chú |
-|------|---------|-----------|---------|
-| 1 | A B C | ~96k | Official + Wordfence + geeknik — luôn cài |
-| 2 | + F G H | ~158k | + FingerprintHub + kayala + daffainfo — **recommended** |
-| 3 | + I J | ~158k+ | + fuzzing + AI-generated — opt-in, dùng cẩn thận |
-
-**Source registry:**
-
-| ID | Repo | Templates | Mô tả |
-|----|------|-----------|-------|
-| A | `projectdiscovery/nuclei-templates` | 13,717 | Official, verified, cập nhật hàng ngày |
-| B | `topscoder/nuclei-wordfence-cve` | 82,731 | WordPress CVE từ Wordfence intel, cập nhật hàng ngày |
-| C | `geeknik/the-nuclei-templates` | 224 | 1-day CVE + bug bounty research |
-| F | `0x727/FingerprintHub` | 18,845 | Tech fingerprint detection |
-| G | `0xKayala/Custom-Nuclei-Templates` | 42,469 | Community general |
-| H | `daffainfo/my-nuclei-templates` | 950 | Personal, unique findings |
-| I | `projectdiscovery/fuzzing-templates` | — | Fuzzing only, không chạy mặc định |
-| J | `projectdiscovery/nuclei-templates-ai` | — | AI-generated, chưa verified |
-
-**Sau khi clone:** Build flat index `all_templates.txt` (toàn bộ `.yaml` trừ fuzzing/AI), ghi `sources.txt` (lịch sử clone/pull với commit hash + số template).
-
-### Output
-
-```
-/opt/nuclei-pipeline/
-├── nuclei-templates/          [A] Official templates
-│   ├── cves/
-│   │   ├── 2020/ … 2025/
-│   ├── exposures/
-│   ├── misconfiguration/
-│   ├── vulnerabilities/
-│   ├── network/
-│   ├── default-logins/
-│   └── technologies/
-├── community/
-│   ├── wordfence-cve/         [B] ~82,731 WordPress CVE .yaml
-│   ├── geeknik/               [C] ~224 templates
-│   ├── fingerprinthub/        [F] ~18,845 fingerprint .yaml
-│   ├── kayala/                [G] ~42,469 templates
-│   └── daffainfo/             [H] ~950 templates
-├── fuzzing/                   [I] opt-in only
-├── ai-generated/              [J] opt-in only
-└── .meta/
-    ├── all_templates.txt      # flat index: đường dẫn tuyệt đối từng .yaml
-    ├── fuzzing_templates.txt  # index riêng cho fuzzing
-    ├── sources.txt            # lịch sử clone/pull: id, timestamp, commit, count
-    └── last_update.txt        # timestamp lần setup gần nhất
-```
-
-### Update định kỳ
-
-```bash
-./setup_templates.sh --source B      # Wordfence: hàng ngày (CVE mới liên tục)
-./setup_templates.sh --tier 2        # Toàn bộ Tier 2: hàng tuần
+./setup_templates.sh --init   # tạo /opt/nuclei-pipeline (cần sudo lần đầu)
+./setup_templates.sh --tier 2 # tải ~158k templates
 ```
 
 ---
 
 ## 09_nuclei.sh — Nuclei vulnerability scan
 
-### Sử dụng
+Xem tài liệu đầy đủ: [docs/09_nuclei.md](docs/09_nuclei.md)
 
+Chạy nhanh:
 ```bash
-# Chạy qua pipeline (khuyến nghị — đảm bảo có đủ input từ bước 07+08)
-./recon.sh example.com --from 07     # chạy 07 → 08 → 09 liên tiếp
-./recon.sh example.com --only 09     # chỉ chạy nuclei (07+08 đã có)
-
-# Chạy độc lập
-./09_nuclei.sh example.com                           # tất cả 3 phase
-./09_nuclei.sh example.com --phase 1                 # chỉ tech-aware scan
-./09_nuclei.sh example.com --phase 2                 # chỉ CVE + exposure sweep
-./09_nuclei.sh example.com --phase 3                 # chỉ network service scan
-./09_nuclei.sh example.com --severity critical,high  # lọc severity (default: critical,high,medium)
-./09_nuclei.sh example.com --rate 20                 # giảm rate (default: 50 req/s)
-./09_nuclei.sh example.com --ai-templates            # bật AI-generated templates (opt-in)
+./scripts/09_nuclei.sh example.com           # tất cả 3 phase
+./scripts/09_nuclei.sh example.com --phase 1 # chỉ tech-aware scan
 ```
-
-### Input
-
-Script đọc output từ các bước trước trong `recon_output/<domain>/`:
-
-| File | Từ bước | Dùng trong |
-|------|---------|-----------|
-| `http/all.json` | 07 httpx | Phase 1: detect tech stack, extract URL |
-| `http/live.txt` | 07 httpx | Fallback nếu không có `all.json` |
-| `triage/tier1.txt` | 08 triage | Phase 1: tier1 extra scan (admin/api/dev) |
-| `ports/open.txt` | 05 portscan | Phase 3: network targets (`ip:port`) |
-| `origin_ips.txt` | 03 cdncheck | Phase 3: bare IP sweep |
-
-> Bắt buộc phải có `http/all.json` (bước 07) trước khi chạy — nếu không có, script báo lỗi và thoát.
-
-### Cơ chế hoạt động
-
-**Template resolution:** Script tự tìm thư mục templates theo thứ tự ưu tiên:
-1. `$NUCLEI_TEMPLATES_DIR` (env override)
-2. `/opt/nuclei-pipeline/` (mặc định)
-3. `~/nuclei-pipeline/` (fallback)
-4. `~/nuclei-templates/` (nuclei default, last resort)
-
-**Phase 1 — Tech-aware scan (targeted, ít noise nhất)**
-
-Đọc `http/all.json` → Python parse field `tech`/`technologies` → tạo file URL riêng theo tech → chạy nuclei với tags/templates phù hợp:
-
-```
-http/all.json
-    │ python parse
-    ├── tech_tomcat.txt   → nuclei -tags tomcat,apache  -t cves/ vulnerabilities/ misconfiguration/
-    ├── tech_nginx.txt    → nuclei -tags nginx           -t cves/ vulnerabilities/ misconfiguration/
-    ├── tech_iis.txt      → nuclei -tags iis,microsoft   -t cves/ ...
-    ├── tech_f5.txt       → nuclei -tags f5,bigip         -t cves/ ...
-    ├── tech_spring.txt   → nuclei -tags springboot,spring ...
-    └── ... (16 tech total)
-
-triage/tier1.txt (admin/api/dev URLs)
-    └── nuclei -tags panel,login,admin,api,debug,backup
-              -t exposures/configs/ exposures/files/ default-logins/ misconfiguration/
-
-live_urls.txt (tất cả)
-    ├── FingerprintHub (18,845 templates) — không filter severity
-    ├── Wordfence CVE  (82,731 templates) — chỉ nếu detect WordPress trong tech field
-    ├── geeknik        (224 templates)
-    ├── kayala         (42,469 templates)
-    ├── daffainfo      (950 templates)
-    └── custom/<domain>/ (templates tự viết)
-```
-
-**Phase 2 — Broad CVE + Exposure sweep (tất cả live targets)**
-
-| Sub-phase | Templates | Filter |
-|-----------|-----------|--------|
-| 2a CVE | `cves/2020/` → `cves/2025/` | Theo năm |
-| 2b Exposure | `exposures/` | tags: config, token, log, backup, env, git, aws |
-| 2c Misconfig | `misconfiguration/` + `default-logins/` | Không filter |
-| 2d Specific | `vulnerabilities/` | tags: cors, ssrf, jwt, takeover, lfi, xss, sqli |
-
-**Phase 3 — Network service scan (non-web ports)**
-
-Lọc `ports/open.txt` bỏ web ports (80/443/8080/...) → chạy network templates + default-logins cho SSH, FTP, Redis. Thêm bare origin IPs để sweep.
-
-**Rate control:**
-
-| Param | Default | Flag |
-|-------|---------|------|
-| Rate limit | 50 req/s | `--rate N` |
-| Concurrency | 10 | hardcoded |
-| Timeout | 10s | hardcoded |
-| Severity | critical,high,medium | `--severity` |
-| Excluded tags | dos, fuzz, headless | hardcoded |
-
-### Output
-
-```
-recon_output/<domain>/nuclei/
-├── phase1_tech/
-│   ├── tomcat.{txt,json}              # CVE + misconfig cho Tomcat targets
-│   ├── nginx.{txt,json}
-│   ├── iis.{txt,json}
-│   ├── apache.{txt,json}
-│   ├── f5.{txt,json}                  # F5 BigIP CVE (CVE-2020-5902, CVE-2022-1388...)
-│   ├── spring.{txt,json}
-│   ├── tier1_extra.{txt,json}         # Admin/API: default-logins + backup + panel
-│   ├── fingerprinthub.{txt,json}      # Tech detection bổ sung
-│   ├── wordfence_cve.{txt,json}       # WordPress CVE — chỉ có nếu detect WP
-│   ├── community_geeknik.{txt,json}
-│   ├── community_kayala.{txt,json}
-│   ├── community_daffainfo.{txt,json}
-│   ├── custom_<domain>.{txt,json}     # Templates tự viết cho target cụ thể
-│   └── ai_generated.{txt,json}        # Chỉ có nếu dùng --ai-templates
-├── phase2_cve.{txt,json}              # CVE findings (2020–2025)
-├── phase2_exposure.{txt,json}         # Config/token/backup/git leak
-├── phase2_misconfig.{txt,json}        # Misconfiguration + default credentials
-├── phase2_specific.{txt,json}         # CORS, SSRF, JWT, LFI, XSS, SQLi
-├── phase3_network.{txt,json}          # Redis/SSH/FTP/MongoDB default-logins + vulns
-├── all_findings.txt                   # Tất cả findings, merged + dedup, sort by severity
-├── all_findings.json                  # JSON export cho tool integration
-└── report.md                          # Triage report: severity breakdown + critical/high list
-```
-
-**Format một dòng trong `all_findings.txt`:**
-```
-[template-id] [severity] [target-url] [matched-at]
-```
-
-**Format `report.md`:** Groupby severity → groupby template-id → list targets bị ảnh hưởng.
 
 ---
 
