@@ -44,7 +44,7 @@ show_help() {
     echo ""
     echo -e "${BOLD}CÁC TÙY CHỌN TỪ ĐIỂN & EXTENSIONS:${RESET}"
     echo -e "  ${YELLOW}-w, --wordlist <file>${RESET}  Chỉ định wordlist tùy chỉnh (Mặc định: dirsearch.txt hoặc raft-medium)"
-    echo -e "  ${YELLOW}-e, --ext <list>${RESET}       Danh sách phần mở rộng file (Mặc định: php,jsp,json,env,bak,zip,sql,txt,xml,yaml,config,action)"
+    echo -e "  ${YELLOW}-e, --ext <list>${RESET}       Danh sách phần mở rộng file (Mặc định: Server-side + PHP variants + Archives + DB + Configs)"
     echo -e "  ${YELLOW}--no-ext${RESET}               Không thêm extension vào wordlist"
     echo ""
     echo -e "${BOLD}CÁC TÙY CHỌN HIỆU NĂNG & RATE LIMIT:${RESET}"
@@ -79,7 +79,8 @@ ALL_LIVE=0
 CUSTOM_URL=""
 CUSTOM_TARGETS=""
 CUSTOM_WORDLIST=""
-EXTENSIONS="php,jsp,json,env,bak,zip,tar.gz,sql,txt,xml,yaml,config,action"
+# Server-side languages (PHP & variants, Java, ASP.NET, Python, Ruby, Perl, CGI, ColdFusion) + Archives & Backups + Configs & DB dumps
+EXTENSIONS="php,php3,php4,php5,php7,php8,phtml,phar,pht,phps,inc,jsp,jspx,jspf,action,do,class,jar,war,ear,asp,aspx,ashx,asmx,axd,svc,py,rb,pl,cgi,cfm,cfc,zip,tar,tar.gz,tgz,rar,7z,gz,bz2,bak,backup,old,orig,save,swp,tmp,sql,dump,db,sqlite,env,config,conf,cfg,ini,json,xml,yaml,yml,properties,txt,log"
 NO_EXT=0
 THREADS=40
 RATE_LIMIT=150
@@ -355,9 +356,11 @@ out_admin = os.environ.get("OUT_ADMIN", "")
 out_all_json = os.environ.get("OUT_ALL_JSON", "")
 
 sensitive_keywords = [
-    ".env", ".git", ".bak", ".old", ".backup", ".sql", ".dump", ".zip", ".tar", ".gz",
-    "web.config", ".htaccess", "database", "id_rsa", "credentials", "secret", "private",
-    "phpinfo", "config.json", "config.php", "config.yml", "heapdump", "actuator/env"
+    ".env", ".git", ".bak", ".old", ".backup", ".orig", ".save", ".swp", ".tmp",
+    ".sql", ".dump", ".db", ".sqlite", ".zip", ".tar", ".gz", ".tgz", ".7z", ".rar", ".bz2",
+    ".war", ".jar", ".ear", "web.config", ".htaccess", ".htpasswd", "database",
+    "id_rsa", "credentials", "secret", "private", ".properties", ".conf", ".cfg", ".ini",
+    "phpinfo", "config.json", "config.php", "config.yml", "heapdump", "actuator/env", "actuator/metrics"
 ]
 
 admin_keywords = [

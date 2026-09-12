@@ -49,7 +49,7 @@
 | `--url <URL>` | `""` | Quét duy nhất 1 URL cụ thể. |
 | `--targets <file>` | `""` | Chỉ định file danh sách target URL tùy chỉnh. |
 | `-w, --wordlist <file>` | `dirsearch.txt` | Chỉ định đường dẫn wordlist tùy chỉnh. |
-| `-e, --ext <list>` | `php,jsp,json,env,bak,zip,tar.gz,sql,txt,xml,yaml,config,action` | Danh sách phần mở rộng nối vào wordlist. |
+| `-e, --ext <list>` | Server-side + PHP variants + Archives + DB + Configs | Danh sách phần mở rộng nối vào wordlist (Mặc định: `php,php3..php8,phtml,phar,inc,jsp,jspx,action,do,class,jar,war,asp,aspx,ashx,asmx,axd,svc,py,rb,pl,cgi,cfm,zip,tar,tar.gz,tgz,rar,7z,gz,bz2,bak,backup,old,save,swp,tmp,sql,dump,db,env,config,conf,cfg,ini,json,xml,yaml,properties,txt,log`). |
 | `--no-ext` | `off` | Tắt tự động thêm extensions (chỉ fuzz theo đúng từ trong wordlist). |
 | `-t, --threads <N>` | `40` | Số luồng worker song song cho mỗi target. |
 | `-r, --rate <N>` | `150` | Giới hạn request/giây tối đa trên mỗi target. |
