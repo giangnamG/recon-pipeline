@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 04_vhost.sh — Virtual Host Discovery (3-layer approach)
+# 04_vhost.sh — Virtual Host Discovery (5-layer approach)
+#
+# LAYER 0: Reverse DNS PTR lookup
+#   → Từ origin IPs → hostname ngược (không qua DNS forward)
+#   → Bắt được hostname share-hosting không có CT/DNS record
 #
 # LAYER 1: Baseline-diff verify (curl --resolve)
 #   → Test known subdomains against their own IPs
 #   → Cross-product: unresolved subdomains × origin IPs
+#   → Verify PTR candidates từ Layer 0
 #
 # LAYER 2: ffuf Host header fuzzing (wordlist-based)
 #   → Tìm hostname CHƯA trong subdomain list
 #   → Dùng -ac (auto-calibrate) để tự học baseline, cắt false positive
+#   → Fallback -fs filter khi -ac flood (>150 results)
 #
-# LAYER 3: SNItch SNI-level fuzzing
-#   → Bắt vhost validate ở tầng TLS handshake (bỏ sót bởi HTTP fuzzing)
-#   → Iterative: extract SANs → query CT → re-fuzz
+# LAYER 3: TLS Cert SAN extraction (tlsx)
+#   → Extract SANs từ cert của origin IPs
+#   → Wildcard SAN → scoped ffuf cho từng namespace
 #
 # LAYER 4: Ripgen permutation
 #   → Generate biến thể từ hostname đã tìm → verify lại
@@ -20,11 +26,16 @@
 # INPUT : output/<domain>/resolved.txt
 #         output/<domain>/unresolved.txt
 #         output/<domain>/origin_ips.txt
-# OUTPUT: output/<domain>/vhosts/verified.txt     — hostname<TAB>ip<TAB>proto
-#         output/<domain>/vhosts/ffuf.txt          — ffuf findings
-#         output/<domain>/vhosts/snitched.txt      — SNItch findings
-#         output/<domain>/vhosts/permutations.txt  — permutation findings
-#         output/<domain>/vhosts/all_vhosts.txt    — merged all layers
+# OUTPUT: output/<domain>/vhosts/verified.txt     — host\tip\tproto\tsource{direct|no-dns|ptr-lookup}
+#         output/<domain>/vhosts/ffuf.txt          — host\tip\thttps\tffuf-{status}
+#         output/<domain>/vhosts/snitched.txt      — host\tip\thttps\t{tlsx-san|wildcard-expanded-{status}}
+#         output/<domain>/vhosts/permutations.txt  — host\tip\tproto\tpermutation
+#         output/<domain>/vhosts/all_vhosts.txt    — merged: host\tip\tproto\tsource\tdns_status
+#
+# NOTE: snitched.txt chứa 2 loại cùng nguồn gốc TLS/cert:
+#   tlsx-san          — hostname từ SAN/CN của cert, verified qua baseline-diff
+#   wildcard-expanded — hostname fuzzing trong namespace của wildcard SAN (*.x.domain.com)
+#   → cả 2 đều được merge vào all_vhosts.txt với tag tương ứng
 # =============================================================================
 
 set -uo pipefail
@@ -46,9 +57,10 @@ IN_SUBDOMAINS="${OUT_DIR}/subdomains.txt"
 
 OUT_VERIFIED="${VHOST_DIR}/verified.txt"
 OUT_FFUF="${VHOST_DIR}/ffuf.txt"
-OUT_SNITCHED="${VHOST_DIR}/snitched.txt"
+OUT_SNITCHED="${VHOST_DIR}/snitched.txt"   # tlsx-san AND wildcard-expanded — cùng nguồn TLS/cert
 OUT_PERMS="${VHOST_DIR}/permutations.txt"
 OUT_ALL="${VHOST_DIR}/all_vhosts.txt"
+FFUF_FILTERED_WL=""   # set bởi Layer 2; đọc bởi Layer 3 wildcard — khai báo sớm tránh unbound
 LOG_FILE="${OUT_DIR}/logs/04_vhost.log"
 TEMP_DIR="$(mktemp -d)"; trap 'rm -rf "$TEMP_DIR"' EXIT
 
@@ -74,10 +86,27 @@ info "Unresolved  : $UNRESOLVED_COUNT (vhost candidates)"
 START_TIME=$(date +%s)
 
 # ══════════════════════════════════════════════════════════════════
-# LAYER 1: Baseline-diff verify (curl --resolve)
+# HELPERS
 # ══════════════════════════════════════════════════════════════════
-step "Layer 1/4 — Baseline-diff Verification (curl)"
-info "Logic: body(random_host) ≠ body(real_host) → confirmed vhost"
+
+# Hostname patterns that are definitively Microsoft-managed endpoints —
+# they pass baseline-diff (server responds differently from random host)
+# but the server is owned by Microsoft, not the target.
+# Only patterns where we are 100% certain it's not target infra.
+SKIP_HOST_PATTERNS=(
+    "^enterpriseregistration\."    # Microsoft MDM/Intune — always windows.net
+    "^enterpriseenrollment\."      # Microsoft MDM — always windows.net
+    "^msoid\."                     # Microsoft Online ID — always msft
+    "^lyncdiscover\."              # Microsoft Skype for Business — always msft
+)
+
+is_skip_host() {
+    local host="$1"
+    for pat in "${SKIP_HOST_PATTERNS[@]}"; do
+        echo "$host" | grep -qE "$pat" && return 0
+    done
+    return 1
+}
 
 verify_vhost() {
     local ip="$1" host="$2" proto="${3:-https}"
@@ -102,14 +131,55 @@ verify_vhost() {
 export -f verify_vhost
 export DOMAIN
 
+# ══════════════════════════════════════════════════════════════════
+# LAYER 0: Reverse DNS PTR lookup
+# Nguyên lý: IP → hostname ngược, không qua DNS forward.
+# Bắt được hostname bind với IP nhưng không có CT log / DNS A record.
+# ══════════════════════════════════════════════════════════════════
+step "Layer 0/4 — Reverse DNS PTR Lookup"
+info "IP → hostname ngược (bắt share-hosting không có DNS forward)"
+
+PTR_CANDIDATES="${TEMP_DIR}/ptr_candidates.txt"
+> "$PTR_CANDIDATES"
+
+while IFS= read -r ip; do
+    [[ -z "$ip" ]] && continue
+    # host <ip> trả về: "<reversed>.in-addr.arpa domain name pointer <hostname>."
+    host "$ip" 2>/dev/null \
+        | grep -oP '[a-zA-Z0-9._-]+\.'"${DOMAIN//./\\.}"'\.?' \
+        | sed 's/\.$//' \
+        | tr '[:upper:]' '[:lower:]' \
+        >> "$PTR_CANDIDATES" || true
+done < "$IN_ORIGIN_IPS"
+
+sort -u "$PTR_CANDIDATES" -o "$PTR_CANDIDATES"
+PTR_COUNT=$(count_lines "$PTR_CANDIDATES")
+
+if [[ "$PTR_COUNT" -gt 0 ]]; then
+    info "PTR: ${PTR_COUNT} hostname candidates từ ${ORIGIN_COUNT} IPs"
+    while IFS= read -r h; do info "  → $h"; done < "$PTR_CANDIDATES"
+else
+    info "PTR: không tìm được hostname mới từ ${ORIGIN_COUNT} IPs"
+fi
+
+# ══════════════════════════════════════════════════════════════════
+# LAYER 1: Baseline-diff verify (curl --resolve)
+# ══════════════════════════════════════════════════════════════════
+step "Layer 1/4 — Baseline-diff Verification (curl)"
+info "Logic: body(random_host) ≠ body(real_host) → confirmed vhost"
+
 # 1a: Resolved hostnames vs their own IP
 info "1a — Resolved hosts vs their IP..."
 while IFS=' ' read -r host ip; do
     grep -qxF "$ip" "$IN_ORIGIN_IPS" 2>/dev/null || continue
+    if is_skip_host "$host"; then
+        info "  SKIP  ${host}  (managed service — not target infra)"
+        continue
+    fi
     for proto in https http; do
         if verify_vhost "$ip" "$host" "$proto"; then
             found "VERIFIED  ${host}  →  ${ip}  (${proto})"
-            printf '%s\t%s\t%s\n' "$host" "$ip" "$proto" >> "$OUT_VERIFIED"
+            printf '%s\t%s\t%s\tdirect\n' "$host" "$ip" "$proto" >> "$OUT_VERIFIED"
             break
         fi
     done
@@ -122,6 +192,10 @@ if [[ "$UNRESOLVED_COUNT" -gt 0 && "$ORIGIN_COUNT" -gt 0 ]]; then
     COUNT=0
     while IFS= read -r host; do
         [[ -z "$host" ]] && continue
+        if is_skip_host "$host"; then
+            info "  SKIP  ${host}  (managed service)"
+            continue
+        fi
         while IFS= read -r ip; do
             [[ -z "$ip" ]] && continue
             COUNT=$(( COUNT + 1 ))
@@ -139,6 +213,30 @@ if [[ "$UNRESOLVED_COUNT" -gt 0 && "$ORIGIN_COUNT" -gt 0 ]]; then
     echo ""
 fi
 
+# 1c: PTR candidates × origin IPs
+if [[ "$PTR_COUNT" -gt 0 ]]; then
+    info "1c — PTR candidates verification (${PTR_COUNT} candidates × ${ORIGIN_COUNT} IPs)..."
+    while IFS= read -r host; do
+        [[ -z "$host" ]] && continue
+        if is_skip_host "$host"; then
+            info "  SKIP  ${host}  (managed service)"
+            continue
+        fi
+        # Skip nếu đã verified ở 1a
+        grep -qP "^${host}\t" "$OUT_VERIFIED" 2>/dev/null && continue
+        while IFS= read -r ip; do
+            [[ -z "$ip" ]] && continue
+            for proto in https http; do
+                if verify_vhost "$ip" "$host" "$proto"; then
+                    found "PTR VERIFIED  ${host}  →  ${ip}  (${proto})"
+                    printf '%s\t%s\t%s\tptr-lookup\n' "$host" "$ip" "$proto" >> "$OUT_VERIFIED"
+                    break
+                fi
+            done
+        done < "$IN_ORIGIN_IPS"
+    done < "$PTR_CANDIDATES"
+fi
+
 VERIFIED_L1=$(count_lines "$OUT_VERIFIED")
 success "Layer 1: ${VERIFIED_L1} verified vhosts"
 
@@ -151,6 +249,42 @@ info "Finds hostnames NOT in our subdomain list"
 FFUF_WORDLIST="/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
 [[ ! -f "$FFUF_WORDLIST" ]] && FFUF_WORDLIST="/usr/share/wordlists/seclists/Discovery/DNS/bitquark-subdomains-top100000.txt"
 
+# Helper: parse một ffuf JSON file → append vào output file
+# Args: <json_file> <namespace_or_domain> <ip> <out_file> <tag_prefix>
+parse_ffuf_json() {
+    local json_file="$1" namespace="$2" ip="$3" out_file="$4" tag="$5"
+    [[ -f "$json_file" ]] || return 0
+    python3 - "$json_file" "$namespace" "$ip" "$out_file" "$tag" <<'PYEOF'
+import sys, json, collections
+
+json_file, namespace, ip, out_file, tag = sys.argv[1:]
+
+try:
+    with open(json_file) as f:
+        data = json.load(f)
+    results = data.get("results", [])
+
+    # Fallback FP detection: nếu >150 results, filter size phổ biến nhất
+    FP_THRESHOLD = 150
+    if len(results) > FP_THRESHOLD:
+        sizes = [r.get("length", 0) for r in results]
+        common_size = collections.Counter(sizes).most_common(1)[0][0]
+        original_count = len(results)
+        results = [r for r in results if r.get("length", 0) != common_size]
+        print(f"  [!] {original_count} results — FP filter: removed size={common_size}, kept {len(results)}")
+
+    with open(out_file, "a") as out:
+        for r in results:
+            word = r["input"].get("FUZZ", "")
+            host = f"{word}.{namespace}" if word else namespace
+            status = r.get("status", 0)
+            size = r.get("length", 0)
+            print(f"  [{tag}] {host} → {ip} [{status}] ({size}b)")
+            out.write(f"{host}\t{ip}\thttps\t{tag}-{status}\n")
+except Exception as e:
+    print(f"  [!] parse error: {e}")
+PYEOF
+}
 if ! cmd_exists ffuf; then
     warn "ffuf not found — skipping layer 2"
     warn "Install: go install github.com/ffuf/ffuf/v2@latest"
@@ -159,29 +293,25 @@ elif [[ ! -f "$FFUF_WORDLIST" ]]; then
 else
     info "Wordlist: $FFUF_WORDLIST"
 
-    # Lọc bỏ subdomain đã biết khỏi wordlist → tránh lặp lại bước 01
+    # Lọc bỏ subdomain đã biết khỏi wordlist — gán vào biến đã khai báo ngoài
     FFUF_FILTERED_WL="${TEMP_DIR}/ffuf_wordlist_filtered.txt"
     if [[ -f "$IN_SUBDOMAINS" ]]; then
-        # Extract prefix (phần trước domain) từ subdomains đã biết
         KNOWN_PREFIXES="${TEMP_DIR}/known_prefixes.txt"
         sed "s/\.${DOMAIN}$//" "$IN_SUBDOMAINS" 2>/dev/null \
             | awk '{print tolower($0)}' | sort -u > "$KNOWN_PREFIXES"
-
-        # Loại những word đã có trong known prefixes
         comm -23 \
             <(awk '{print tolower($0)}' "$FFUF_WORDLIST" | sort -u) \
             "$KNOWN_PREFIXES" > "$FFUF_FILTERED_WL"
-
         ORIG=$(wc -l < "$FFUF_WORDLIST")
         AFTER=$(wc -l < "$FFUF_FILTERED_WL")
-        info "Wordlist filtered: $ORIG → $AFTER words (removed $((ORIG - AFTER)) known subdomains)"
+        info "Wordlist filtered: $ORIG → $AFTER words (removed $((ORIG - AFTER)) known)"
     else
         cp "$FFUF_WORDLIST" "$FFUF_FILTERED_WL"
     fi
 
     while IFS= read -r ip; do
         [[ -z "$ip" ]] && continue
-        info "ffuf → $ip"
+        info "ffuf → $ip (domain: ${DOMAIN})"
         FFUF_JSON="${TEMP_DIR}/ffuf_${ip//\./_}.json"
 
         ffuf \
@@ -197,31 +327,7 @@ else
             -s \
             2>/dev/null || true
 
-        # Parse ffuf JSON output
-        if [[ -f "$FFUF_JSON" ]]; then
-            python3 - "$FFUF_JSON" "$DOMAIN" "$ip" "$OUT_FFUF" <<'PYEOF'
-import sys, json
-
-ffuf_file = sys.argv[1]
-domain    = sys.argv[2]
-ip        = sys.argv[3]
-out_file  = sys.argv[4]
-
-try:
-    with open(ffuf_file) as f:
-        data = json.load(f)
-    results = data.get("results", [])
-    with open(out_file, "a") as out:
-        for r in results:
-            host = f"{r['input']['FUZZ']}.{domain}"
-            status = r.get("status", 0)
-            size = r.get("length", 0)
-            print(f"  [ffuf] {host} → {ip} [{status}] ({size} bytes)")
-            out.write(f"{host}\t{ip}\thttps\tffuf-{status}\n")
-except Exception as e:
-    print(f"  [!] ffuf parse error: {e}")
-PYEOF
-        fi
+        parse_ffuf_json "$FFUF_JSON" "$DOMAIN" "$ip" "$OUT_FFUF" "ffuf"
     done < "$IN_ORIGIN_IPS"
 
     FFUF_COUNT=$(count_lines "$OUT_FFUF")
@@ -229,18 +335,16 @@ PYEOF
 fi
 
 # ══════════════════════════════════════════════════════════════════
-# LAYER 3: tlsx — TLS cert SAN extraction
-# Extract Subject Alternative Names từ TLS cert của từng origin IP
-# → tìm hostname ẩn không có trong DNS (internal vhost, staging...)
+# LAYER 3: TLS Cert SAN extraction (tlsx)
+# Extract SANs → verify → Wildcard SAN → scoped ffuf
 # ══════════════════════════════════════════════════════════════════
 step "Layer 3/4 — TLS Cert SAN Extraction (tlsx)"
-info "Extract SANs từ TLS cert → tìm vhost không có trong DNS"
+info "Extract SANs từ TLS cert → verify → wildcard namespace fuzz"
 
 if cmd_exists tlsx; then
     info "Tool: tlsx (ProjectDiscovery)"
     TLSX_RAW="${TEMP_DIR}/tlsx_raw.txt"
 
-    # Probe tất cả origin IPs trên port 443 và 8443
     while IFS= read -r ip; do
         [[ -z "$ip" ]] && continue
         for port in 443 8443; do
@@ -253,13 +357,13 @@ if cmd_exists tlsx; then
         done
     done < "$IN_ORIGIN_IPS"
 
-    # Parse: "ip:port [hostname]" → extract hostname thuộc domain
     if [[ -f "$TLSX_RAW" && -s "$TLSX_RAW" ]]; then
+
+        # 3a: Non-wildcard SANs → verify
         grep -oP '[a-z0-9*._-]+\.'"${DOMAIN//./\\.}" "$TLSX_RAW" 2>/dev/null \
             | grep -v '^\*\.' \
             | sort -u \
             | while IFS= read -r host; do
-                # Verify: host có respond khác random không?
                 while IFS= read -r ip; do
                     if verify_vhost "$ip" "$host" "https"; then
                         found "TLS-SAN VERIFIED  ${host}  →  ${ip}"
@@ -269,13 +373,39 @@ if cmd_exists tlsx; then
                 done < "$IN_ORIGIN_IPS"
               done
 
-        # Wildcard SAN → dùng làm input cho ffuf ở layer 2 nếu có
+        # 3b: Wildcard SANs → scoped ffuf cho từng namespace
+        # Ví dụ: *.apps.internal.example.com → fuzz FUZZ.apps.internal.example.com
         WILDCARD_SANS=$(grep -oP '\*\.[a-z0-9._-]+\.'"${DOMAIN//./\\.}" "$TLSX_RAW" 2>/dev/null | sort -u)
+
         if [[ -n "$WILDCARD_SANS" ]]; then
-            info "Wildcard SANs found (có thể có nhiều vhost ẩn):"
-            echo "$WILDCARD_SANS" | while IFS= read -r wc; do
-                info "  $wc"
+            info "Wildcard SANs → scoped ffuf cho từng namespace:"
+            echo "$WILDCARD_SANS" | while IFS= read -r wildcard; do
+                namespace="${wildcard#\*.}"
+                info "  Namespace: ${namespace}"
+
+                if ! cmd_exists ffuf || [[ ! -f "${FFUF_FILTERED_WL:-}" ]]; then
+                    warn "  ffuf/wordlist không có — skip namespace fuzz"
+                    continue
+                fi
+
+                while IFS= read -r ip; do
+                    [[ -z "$ip" ]] && continue
+                    WC_JSON="${TEMP_DIR}/ffuf_wc_${ip//\./_}_${namespace//\./_}.json"
+
+                    ffuf \
+                        -w "${FFUF_FILTERED_WL}:FUZZ" \
+                        -u "https://${ip}/" \
+                        -H "Host: FUZZ.${namespace}" \
+                        -ac \
+                        -mc 200,201,204,301,302,307,308,401,403,405 \
+                        -t 30 -timeout 8 \
+                        -o "$WC_JSON" -of json -s 2>/dev/null || true
+
+                    parse_ffuf_json "$WC_JSON" "$namespace" "$ip" "$OUT_SNITCHED" "wildcard-expanded"
+                done < "$IN_ORIGIN_IPS"
             done
+        else
+            info "Không tìm thấy wildcard SAN"
         fi
     fi
 
@@ -296,10 +426,10 @@ if cmd_exists ripgen; then
     info "Tool: ripgen"
     PERM_LIST="${TEMP_DIR}/permutations.txt"
 
-    # Feed all verified hostnames into ripgen
     {
         awk '{print $1}' "$OUT_VERIFIED" 2>/dev/null
         awk '{print $1}' "$OUT_FFUF" 2>/dev/null
+        awk '{print $1}' "$OUT_SNITCHED" 2>/dev/null
     } | sort -u | ripgen 2>/dev/null \
         | grep -E "(^|\.)${DOMAIN//./\\.}$" \
         | sort -u > "$PERM_LIST" || true
@@ -335,21 +465,19 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════
-# MERGE all layers
+# MERGE all layers + dns_status classification
 # ══════════════════════════════════════════════════════════════════
-step "Merging all layers"
+step "Merging all layers + DNS status classification"
+info "Phân loại: dns-resolvable (có A record công khai) vs hidden-vhost"
 
-# Dedup theo hostname (col 1) — giữ dòng đầu tiên mỗi hostname
-# sort -u chỉ dedup dòng giống hệt, có thể trùng hostname với IP khác nhau
-# → dùng awk để dedup theo hostname, ưu tiên: verified > ffuf > tlsx > permutation
 python3 - "$OUT_VERIFIED" "$OUT_FFUF" "$OUT_SNITCHED" "$OUT_PERMS" "$OUT_ALL" <<'PYEOF'
-import sys
+import sys, subprocess
 
 files   = sys.argv[1:5]
 out_all = sys.argv[5]
 
-seen_hosts = {}   # hostname → best entry
-
+# Dedup theo hostname, ưu tiên: verified > ffuf > tlsx > permutation
+seen_hosts = {}
 for fpath in files:
     try:
         with open(fpath) as f:
@@ -361,17 +489,41 @@ for fpath in files:
                 host = parts[0].lower() if parts else ""
                 if not host:
                     continue
-                # Giữ entry đầu tiên gặp (files đã theo thứ tự ưu tiên)
                 if host not in seen_hosts:
                     seen_hosts[host] = line
     except FileNotFoundError:
         pass
 
+def has_public_dns(hostname):
+    """True nếu hostname có A record công khai (dig +short)."""
+    try:
+        r = subprocess.run(
+            ["dig", "+short", "+time=2", "+tries=1", hostname, "A"],
+            capture_output=True, text=True, timeout=4
+        )
+        # Kết quả có ít nhất 1 IP → resolvable
+        return any(
+            line.strip() and line.strip()[0].isdigit()
+            for line in r.stdout.splitlines()
+        )
+    except Exception:
+        return False
+
+hidden_count = 0
+resolvable_count = 0
+
 with open(out_all, 'w') as f:
     for host, line in sorted(seen_hosts.items()):
-        f.write(line + '\n')
+        dns_status = "dns-resolvable" if has_public_dns(host) else "hidden-vhost"
+        if dns_status == "hidden-vhost":
+            hidden_count += 1
+        else:
+            resolvable_count += 1
+        f.write(line + f'\t{dns_status}\n')
 
-print(f"  Merged: {len(seen_hosts)} unique hostnames")
+total = len(seen_hosts)
+print(f"  Merged  : {total} unique hostnames")
+print(f"  Resolvable : {resolvable_count}  |  Hidden : {hidden_count}")
 PYEOF
 
 END_TIME=$(date +%s)
@@ -379,23 +531,37 @@ ELAPSED=$(( END_TIME - START_TIME ))
 ELAPSED_FMT=$(printf '%02d:%02d:%02d' $((ELAPSED/3600)) $(((ELAPSED%3600)/60)) $((ELAPSED%60)))
 
 ALL_COUNT=$(count_lines "$OUT_ALL")
+HIDDEN_COUNT=$(grep -c 'hidden-vhost' "$OUT_ALL" 2>/dev/null || echo 0)
+RESOLVABLE_COUNT=$(grep -c 'dns-resolvable' "$OUT_ALL" 2>/dev/null || echo 0)
 
 summary_box "04 VHOST DISCOVERY" \
     "Domain" "$DOMAIN" \
+    "Layer 0 (PTR)" "${PTR_COUNT} candidates" \
     "Layer 1 (curl)" "$(count_lines "$OUT_VERIFIED") verified" \
     "Layer 2 (ffuf)" "$(count_lines "$OUT_FFUF") found" \
-    "Layer 3 (SNItch)" "$(count_lines "$OUT_SNITCHED") found" \
+    "Layer 3 (TLS-SAN)" "$(count_lines "$OUT_SNITCHED") found" \
     "Layer 4 (ripgen)" "$(count_lines "$OUT_PERMS") found" \
     "Total unique" "$ALL_COUNT vhosts" \
+    "  hidden-vhost" "$HIDDEN_COUNT (no public DNS)" \
+    "  dns-resolvable" "$RESOLVABLE_COUNT" \
     "Elapsed" "$ELAPSED_FMT" \
     "Next" "05_portscan.sh $DOMAIN"
 
 if [[ "$ALL_COUNT" -gt 0 ]]; then
     step "All verified vhosts"
-    printf "  ${DIM}%-40s %-18s %-9s %s${RESET}\n" "hostname" "ip" "proto" "source"
-    printf "  ${DIM}%s${RESET}\n" "$(printf '%.0s─' {1..78})"
-    while IFS=$'\t' read -r host ip proto src; do
+    printf "  ${DIM}%-40s %-18s %-9s %-22s %s${RESET}\n" \
+        "hostname" "ip" "proto" "source" "dns_status"
+    printf "  ${DIM}%s${RESET}\n" "$(printf '%.0s─' {1..100})"
+    while IFS=$'\t' read -r host ip proto src dns_status; do
         src="${src:-direct}"
-        printf "  ${MAGENTA}★${RESET}  %-38s %-18s %-9s %s\n" "$host" "$ip" "$proto" "$src"
+        dns_status="${dns_status:-unknown}"
+        # hidden-vhost in yellow, resolvable in normal
+        if [[ "$dns_status" == "hidden-vhost" ]]; then
+            printf "  ${MAGENTA}★${RESET}  %-38s %-18s %-9s %-22s ${YELLOW}%s${RESET}\n" \
+                "$host" "$ip" "$proto" "$src" "$dns_status"
+        else
+            printf "  ${MAGENTA}★${RESET}  %-38s %-18s %-9s %-22s %s\n" \
+                "$host" "$ip" "$proto" "$src" "$dns_status"
+        fi
     done < "$OUT_ALL"
 fi

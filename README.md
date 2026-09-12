@@ -82,7 +82,7 @@ chmod +x *.sh
 | 01 | `01_subdomain.sh` | Thu thập subdomain (passive + active bruteforce) |
 | 02 | `02_resolve.sh` | Resolve DNS, lọc wildcard, lấy danh sách IP |
 | 03 | `03_cdncheck.sh` | Phân loại IP: CDN/WAF (bỏ qua) vs origin (giữ lại) |
-| 04 | `04_vhost.sh` | Tìm virtual host ẩn qua 4 lớp: curl / ffuf / SNItch / ripgen |
+| 04 | `04_vhost.sh` | Tìm virtual host ẩn qua 5 lớp: PTR / curl / ffuf / TLS-SAN+wildcard / ripgen |
 | 05 | `05_portscan.sh` | Scan port với naabu, build danh sách URL có port |
 | 06 | `06_service.sh` | Detect service/version với nmap, lọc CDN qua banner |
 | 07 | `07_httpx.sh` | Probe HTTP: status code, title, tech stack, server |
@@ -103,10 +103,11 @@ output/example.com/
 ├── origin_ips.txt          # IP thật (đã loại CDN/WAF)
 ├── cdn_ips.txt             # IP CDN/WAF (bỏ qua)
 ├── vhosts/
-│   ├── verified.txt        # Vhost xác nhận qua curl baseline-diff
+│   ├── verified.txt        # Vhost xác nhận qua curl baseline-diff (tags: direct, no-dns, ptr-lookup)
 │   ├── ffuf.txt            # Vhost tìm qua ffuf Host fuzzing
-│   ├── snitched.txt        # Vhost tìm qua SNI fuzzing
-│   └── all_vhosts.txt      # Tổng hợp tất cả vhost
+│   ├── snitched.txt        # Vhost tìm qua TLS-SAN + wildcard scoped fuzz
+│   ├── permutations.txt    # Vhost tìm qua ripgen permutation
+│   └── all_vhosts.txt      # Tổng hợp: host, ip, proto, source, dns_status
 ├── ports/
 │   ├── open.txt            # ip:port đang mở
 │   ├── web.txt             # Chỉ web ports
