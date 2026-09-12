@@ -162,7 +162,7 @@ Sau khi 3 phase hoàn thành:
 
 ```
 recon_output/<domain>/nuclei/
-├── phase1_tech/
+├── tech/
 │   ├── tomcat.{txt,json}              # CVE + misconfig cho Tomcat targets
 │   ├── nginx.{txt,json}
 │   ├── iis.{txt,json}
@@ -177,11 +177,11 @@ recon_output/<domain>/nuclei/
 │   ├── community_daffainfo.{txt,json}
 │   ├── custom_<domain>.{txt,json}     # Templates tự viết (vd: custom_mbbank.json)
 │   └── ai_generated.{txt,json}        # Chỉ có nếu dùng --ai-templates
-├── phase2_cve.{txt,json}              # CVE findings (2020–2025)
-├── phase2_exposure.{txt,json}         # Config/token/backup/git leak
-├── phase2_misconfig.{txt,json}        # Misconfiguration + default credentials
-├── phase2_specific.{txt,json}         # CORS, SSRF, JWT, LFI, XSS, SQLi
-├── phase3_network.{txt,json}          # Redis/SSH/FTP/MongoDB default-logins + vulns
+├── cve.{txt,json}                     # CVE findings (2020–2025)
+├── exposure.{txt,json}                # Config/token/backup/git leak
+├── misconfig.{txt,json}               # Misconfiguration + default credentials
+├── vulnerabilities.{txt,json}         # CORS, SSRF, JWT, LFI, XSS, SQLi
+├── network.{txt,json}                 # Redis/SSH/FTP/MongoDB default-logins + vulns
 ├── all_findings.txt                   # Tất cả findings, merged + dedup, sort by severity
 ├── all_findings.json                  # JSON export cho tool integration
 └── report.md                          # Triage report: severity breakdown + critical/high list

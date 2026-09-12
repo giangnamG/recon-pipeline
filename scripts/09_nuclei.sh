@@ -31,12 +31,13 @@
 #
 # OUTPUT:
 #   output/<domain>/nuclei/
-#     phase1_tech/
+#     tech/
 #       tomcat.txt  nginx.txt  f5.txt  iis.txt  php.txt  spring.txt  ...
-#     phase2_cve.txt          — CVE findings trên tất cả live targets
-#     phase2_exposure.txt     — Exposed files / configs
-#     phase2_misconfig.txt    — Misconfigurations
-#     phase3_network.txt      — Network service vulnerabilities
+#     cve.txt                 — CVE findings trên tất cả live targets
+#     exposure.txt            — Exposed files / configs
+#     misconfig.txt           — Misconfigurations
+#     vulnerabilities.txt     — Specific checks (CORS, SSRF, JWT, etc.)
+#     network.txt             — Network service vulnerabilities
 #     all_findings.txt        — Merged, sorted by severity
 #     all_findings.json       — JSON format cho integration
 #     report.md               — Triage-ready report
@@ -97,8 +98,8 @@ fi
 # ─── Paths ───────────────────────────────────────────────────────────────────
 OUT_DIR="$(output_dir "$DOMAIN")"
 NUCLEI_DIR="${OUT_DIR}/nuclei"
-PHASE1_DIR="${NUCLEI_DIR}/phase1_tech"
-mkdir -p "$NUCLEI_DIR" "$PHASE1_DIR"
+TECH_DIR="${NUCLEI_DIR}/tech"
+mkdir -p "$NUCLEI_DIR" "$TECH_DIR"
 
 IN_HTTPX_JSON="${OUT_DIR}/http/all.json"
 IN_LIVE="${OUT_DIR}/http/live.txt"
@@ -106,10 +107,11 @@ IN_TIER1="${OUT_DIR}/triage/tier1.txt"
 IN_OPEN_PORTS="${OUT_DIR}/ports/open.txt"
 IN_ORIGIN_IPS="${OUT_DIR}/origin_ips.txt"
 
-OUT_PHASE2_CVE="${NUCLEI_DIR}/phase2_cve.txt"
-OUT_PHASE2_EXP="${NUCLEI_DIR}/phase2_exposure.txt"
-OUT_PHASE2_MISC="${NUCLEI_DIR}/phase2_misconfig.txt"
-OUT_PHASE3_NET="${NUCLEI_DIR}/phase3_network.txt"
+OUT_CVE="${NUCLEI_DIR}/cve.txt"
+OUT_EXP="${NUCLEI_DIR}/exposure.txt"
+OUT_MISC="${NUCLEI_DIR}/misconfig.txt"
+OUT_SPECIFIC="${NUCLEI_DIR}/vulnerabilities.txt"
+OUT_NET="${NUCLEI_DIR}/network.txt"
 OUT_ALL="${NUCLEI_DIR}/all_findings.txt"
 OUT_ALL_JSON="${NUCLEI_DIR}/all_findings.json"
 OUT_REPORT="${NUCLEI_DIR}/report.md"
@@ -409,10 +411,10 @@ PYEOF
         [[ -f "$tech_input" && -s "$tech_input" ]] || continue
 
         tags="${TECH_TEMPLATES[$tech]}"
-        out_txt="${PHASE1_DIR}/${tech}.txt"
-        out_json="${PHASE1_DIR}/${tech}.json"
+        out_txt="${TECH_DIR}/${tech}.txt"
+        out_json="${TECH_DIR}/${tech}.json"
 
-        step "  Phase 1 → ${tech} ($(wc -l < "$tech_input") targets)"
+        step "  Tech → ${tech} ($(wc -l < "$tech_input") targets)"
         run_nuclei "$tech_input" "$out_txt" "$out_json" \
             -tags "${tags//tags=/}" \
             -t "${TEMPLATES_DIR}/cves/" \
@@ -422,9 +424,9 @@ PYEOF
 
     # ── Tier 1 targets: extra templates ──────────────────────────────────────
     if [[ -s "$TIER1_URLS" ]]; then
-        step "  Phase 1 → Tier 1 extra scan (admin/api/dev/staging)"
-        out_txt="${PHASE1_DIR}/tier1_extra.txt"
-        out_json="${PHASE1_DIR}/tier1_extra.json"
+        step "  Tech → Tier 1 extra scan (admin/api/dev/staging)"
+        out_txt="${TECH_DIR}/tier1_extra.txt"
+        out_json="${TECH_DIR}/tier1_extra.json"
         run_nuclei "$TIER1_URLS" "$out_txt" "$out_json" \
             -t "${TEMPLATES_DIR}/exposures/configs/" \
             -t "${TEMPLATES_DIR}/exposures/files/" \
@@ -436,11 +438,11 @@ PYEOF
     # ── FingerprintHub — tech detection bổ sung ───────────────────────────────
     # Chạy trước community để có thêm context về tech stack
     if [[ -d "$FINGERPRINT_LOCAL" && -s "$LIVE_URLS" ]]; then
-        step "  Phase 1 → FingerprintHub tech detection"
+        step "  Tech → FingerprintHub tech detection"
         FP_COUNT=$(find "$FINGERPRINT_LOCAL" -name "*.yaml" | wc -l | tr -d ' ')
         info "FingerprintHub: $FP_COUNT fingerprint templates"
-        out_txt="${PHASE1_DIR}/fingerprinthub.txt"
-        out_json="${PHASE1_DIR}/fingerprinthub.json"
+        out_txt="${TECH_DIR}/fingerprinthub.txt"
+        out_json="${TECH_DIR}/fingerprinthub.json"
         # Fingerprint templates thường severity=info — bỏ severity filter
         nuclei \
             -l "$LIVE_URLS" \
@@ -480,11 +482,11 @@ for line in open('$IN_HTTPX_JSON'):
 
         WP_COUNT=$(wc -l < "$WP_URLS" 2>/dev/null | tr -d ' ' || echo 0)
         if [[ "$WP_COUNT" -gt 0 ]]; then
-            step "  Phase 1 → Wordfence WordPress CVE scan ($WP_COUNT WP targets)"
+            step "  Tech → Wordfence WordPress CVE scan ($WP_COUNT WP targets)"
             WF_TOTAL=$(find "$WORDFENCE_LOCAL" -name "*.yaml" | wc -l | tr -d ' ')
             info "Wordfence templates: $WF_TOTAL (~82k WordPress CVE)"
-            out_txt="${PHASE1_DIR}/wordfence_cve.txt"
-            out_json="${PHASE1_DIR}/wordfence_cve.json"
+            out_txt="${TECH_DIR}/wordfence_cve.txt"
+            out_json="${TECH_DIR}/wordfence_cve.json"
             run_nuclei "$WP_URLS" "$out_txt" "$out_json" \
                 -t "$WORDFENCE_LOCAL" \
                 -tags "wordpress,wp,plugin,theme"
@@ -498,9 +500,9 @@ for line in open('$IN_HTTPX_JSON'):
         comm_dir="${COMMUNITY_LOCAL}/${comm_id}"
         [[ -d "$comm_dir" && -s "$LIVE_URLS" ]] || continue
         comm_count=$(find "$comm_dir" -name "*.yaml" | wc -l | tr -d ' ')
-        step "  Phase 1 → Community [$comm_id] ($comm_count templates)"
-        out_txt="${PHASE1_DIR}/community_${comm_id}.txt"
-        out_json="${PHASE1_DIR}/community_${comm_id}.json"
+        step "  Tech → Community [$comm_id] ($comm_count templates)"
+        out_txt="${TECH_DIR}/community_${comm_id}.txt"
+        out_json="${TECH_DIR}/community_${comm_id}.json"
         run_nuclei "$LIVE_URLS" "$out_txt" "$out_json" -t "$comm_dir"
     done
 
@@ -508,22 +510,22 @@ for line in open('$IN_HTTPX_JSON'):
     # Chỉ chạy khi --ai-templates được truyền vào 09_nuclei.sh
     if [[ "${USE_AI_TEMPLATES:-0}" == "1" && -d "$AI_LOCAL" && -s "$LIVE_URLS" ]]; then
         AI_COUNT=$(find "$AI_LOCAL" -name "*.yaml" | wc -l | tr -d ' ')
-        warn "  Phase 1 → AI-generated templates ($AI_COUNT) — UNVERIFIED, use with caution"
-        out_txt="${PHASE1_DIR}/ai_generated.txt"
-        out_json="${PHASE1_DIR}/ai_generated.json"
+        warn "  Tech → AI-generated templates ($AI_COUNT) — UNVERIFIED, use with caution"
+        out_txt="${TECH_DIR}/ai_generated.txt"
+        out_json="${TECH_DIR}/ai_generated.json"
         run_nuclei "$LIVE_URLS" "$out_txt" "$out_json" -t "$AI_LOCAL"
     fi
 
     # ── Custom templates cho target cụ thể ────────────────────────────────────
     if [[ -d "$CUSTOM_LOCAL" && -s "$LIVE_URLS" ]]; then
-        step "  Phase 1 → Custom target-specific templates"
+        step "  Tech → Custom target-specific templates"
         # Chạy tất cả custom templates, ưu tiên mbbank/ nếu đang scan mbbank
         CUSTOM_TARGET_DIR="${CUSTOM_LOCAL}/${DOMAIN%%.*}"  # vd: custom/mbbank/
         if [[ -d "$CUSTOM_TARGET_DIR" ]]; then
             CUST_T=$(find "$CUSTOM_TARGET_DIR" -name "*.yaml" | wc -l | tr -d ' ')
             info "Custom templates for ${DOMAIN%%.*}: $CUST_T templates"
-            out_txt="${PHASE1_DIR}/custom_${DOMAIN%%.*}.txt"
-            out_json="${PHASE1_DIR}/custom_${DOMAIN%%.*}.json"
+            out_txt="${TECH_DIR}/custom_${DOMAIN%%.*}.txt"
+            out_json="${TECH_DIR}/custom_${DOMAIN%%.*}.json"
             # Custom templates thường không cần severity filter — chạy info cũng OK
             nuclei \
                 -l "$LIVE_URLS" \
@@ -545,25 +547,25 @@ for line in open('$IN_HTTPX_JSON'):
         # Generic custom templates (không theo target)
         CUSTOM_GENERIC="${CUSTOM_LOCAL}/generic"
         if [[ -d "$CUSTOM_GENERIC" ]]; then
-            out_txt="${PHASE1_DIR}/custom_generic.txt"
-            out_json="${PHASE1_DIR}/custom_generic.json"
+            out_txt="${TECH_DIR}/custom_generic.txt"
+            out_json="${TECH_DIR}/custom_generic.json"
             run_nuclei "$LIVE_URLS" "$out_txt" "$out_json" -t "$CUSTOM_GENERIC"
         fi
     fi
 
-    PHASE1_TOTAL=$(find "$PHASE1_DIR" -name "*.txt" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo 0)
-    success "Phase 1 complete — $PHASE1_TOTAL total findings"
+    TECH_TOTAL=$(find "$TECH_DIR" -name "*.txt" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo 0)
+    success "Tech scan complete — $TECH_TOTAL total findings"
 fi
 
 # =============================================================================
-# PHASE 2: BROAD CVE + EXPOSURE SWEEP
+# CVE + EXPOSURE + MISCONFIG SWEEP
 # =============================================================================
 if [[ "$RUN_CVE" -eq 1 ]]; then
-    step "PHASE 2 — CVE + Exposure Sweep (all live targets)"
+    step "CVE — Broad CVE + Exposure Sweep (all live targets)"
 
-    # 2a: CVE scan — latest 3 years (most relevant, not too noisy)
-    step "  Phase 2a → CVE scan (2022–2025)"
-    CVE_TARGETS="${TEMP_DIR}/phase2_targets.txt"
+    # CVE scan — latest 3 years (most relevant, not too noisy)
+    step "  CVE → Recent CVE scan (2022–2025)"
+    CVE_TARGETS="${TEMP_DIR}/cve_targets.txt"
     cp "$LIVE_URLS" "$CVE_TARGETS"
 
     CVE_DIRS=()
@@ -576,53 +578,52 @@ if [[ "$RUN_CVE" -eq 1 ]]; then
 
     if [[ "${#CVE_DIRS[@]}" -gt 0 ]]; then
         run_nuclei "$CVE_TARGETS" \
-            "$OUT_PHASE2_CVE" \
-            "${OUT_PHASE2_CVE%.txt}.json" \
+            "$OUT_CVE" \
+            "${OUT_CVE%.txt}.json" \
             "${CVE_DIRS[@]}"
     else
         # Fallback: full CVE dir
         run_nuclei "$CVE_TARGETS" \
-            "$OUT_PHASE2_CVE" \
-            "${OUT_PHASE2_CVE%.txt}.json" \
+            "$OUT_CVE" \
+            "${OUT_CVE%.txt}.json" \
             -t "${TEMPLATES_DIR}/cves/"
     fi
 
-    # 2b: Exposures — sensitive file/config leaks
-    step "  Phase 2b → Exposure scan (configs, files, tokens, logs)"
+    # Exposures — sensitive file/config leaks
+    step "  Exposure → Exposure scan (configs, files, tokens, logs)"
     run_nuclei "$LIVE_URLS" \
-        "$OUT_PHASE2_EXP" \
-        "${OUT_PHASE2_EXP%.txt}.json" \
+        "$OUT_EXP" \
+        "${OUT_EXP%.txt}.json" \
         -t "${TEMPLATES_DIR}/exposures/" \
         -tags "exposure,config,token,log,backup,env,git,aws,cloud"
 
-    # 2c: Misconfiguration
-    step "  Phase 2c → Misconfiguration scan"
+    # Misconfiguration
+    step "  Misconfig → Misconfiguration scan"
     run_nuclei "$LIVE_URLS" \
-        "$OUT_PHASE2_MISC" \
-        "${OUT_PHASE2_MISC%.txt}.json" \
+        "$OUT_MISC" \
+        "${OUT_MISC%.txt}.json" \
         -t "${TEMPLATES_DIR}/misconfiguration/" \
         -t "${TEMPLATES_DIR}/default-logins/"
 
-    # 2d: Specific high-value checks
-    step "  Phase 2d → Specific checks (CORS, SSRF, JWT, takeover)"
-    OUT_PHASE2_SPECIFIC="${NUCLEI_DIR}/phase2_specific.txt"
+    # Specific high-value checks
+    step "  Vulnerabilities → Specific checks (CORS, SSRF, JWT, takeover)"
     run_nuclei "$LIVE_URLS" \
-        "$OUT_PHASE2_SPECIFIC" \
-        "${OUT_PHASE2_SPECIFIC%.txt}.json" \
+        "$OUT_SPECIFIC" \
+        "${OUT_SPECIFIC%.txt}.json" \
         -tags "cors,ssrf,redirect,jwt,takeover,xxe,ssti,lfi,xss,sqli" \
         -t "${TEMPLATES_DIR}/vulnerabilities/"
 
-    CVE_FOUND=$(wc -l < "$OUT_PHASE2_CVE" 2>/dev/null | tr -d ' ' || echo 0)
-    EXP_FOUND=$(wc -l < "$OUT_PHASE2_EXP" 2>/dev/null | tr -d ' ' || echo 0)
-    MISC_FOUND=$(wc -l < "$OUT_PHASE2_MISC" 2>/dev/null | tr -d ' ' || echo 0)
-    success "Phase 2 — CVE:${CVE_FOUND}  Exposure:${EXP_FOUND}  Misconfig:${MISC_FOUND}"
+    CVE_FOUND=$(wc -l < "$OUT_CVE" 2>/dev/null | tr -d ' ' || echo 0)
+    EXP_FOUND=$(wc -l < "$OUT_EXP" 2>/dev/null | tr -d ' ' || echo 0)
+    MISC_FOUND=$(wc -l < "$OUT_MISC" 2>/dev/null | tr -d ' ' || echo 0)
+    success "CVE sweep — CVE:${CVE_FOUND}  Exposure:${EXP_FOUND}  Misconfig:${MISC_FOUND}"
 fi
 
 # =============================================================================
-# PHASE 3: NETWORK-LEVEL SCAN
+# NETWORK-LEVEL SCAN
 # =============================================================================
 if [[ "$RUN_NETWORK" -eq 1 ]]; then
-    step "PHASE 3 — Network Service Scan (origin IPs)"
+    step "NETWORK — Network Service Scan (origin IPs)"
     info "Targets: ports/open.txt + origin_ips.txt"
 
     # Build host:port list from open ports
@@ -652,15 +653,15 @@ if [[ "$RUN_NETWORK" -eq 1 ]]; then
     if [[ "$NET_TOTAL" -gt 0 ]] && [[ -d "${TEMPLATES_DIR}/network" ]]; then
         info "Network targets: $NET_TOTAL"
         run_nuclei "$NETWORK_TARGETS" \
-            "$OUT_PHASE3_NET" \
-            "${OUT_PHASE3_NET%.txt}.json" \
+            "$OUT_NET" \
+            "${OUT_NET%.txt}.json" \
             -t "${TEMPLATES_DIR}/network/" \
             -t "${TEMPLATES_DIR}/default-logins/ssh/" \
             -t "${TEMPLATES_DIR}/default-logins/ftp/" \
             -t "${TEMPLATES_DIR}/default-logins/redis.yaml" \
             2>/dev/null || true
     else
-        warn "No network targets or no network templates — skipping phase 3"
+        warn "No network targets or no network templates — skipping network scan"
     fi
 fi
 
@@ -829,9 +830,15 @@ END_TIME=$(date +%s)
 ELAPSED=$(( END_TIME - START_TIME ))
 ELAPSED_FMT=$(printf '%02d:%02d:%02d' $((ELAPSED/3600)) $(((ELAPSED%3600)/60)) $((ELAPSED%60)))
 
+SCAN_TAGS=()
+[[ "$RUN_TECH" -eq 1 ]] && SCAN_TAGS+=("tech")
+[[ "$RUN_CVE" -eq 1 ]] && SCAN_TAGS+=("cve")
+[[ "$RUN_NETWORK" -eq 1 ]] && SCAN_TAGS+=("network")
+SCAN_MODE="$(IFS=,; echo "${SCAN_TAGS[*]}")"
+
 summary_box "09 NUCLEI SCAN" \
     "Domain"    "$DOMAIN" \
-    "Phase"     "$PHASE" \
+    "Scans"     "$SCAN_MODE" \
     "Severity"  "$SEVERITY" \
     "Critical"  "$CRIT_COUNT" \
     "High"      "$HIGH_COUNT" \
