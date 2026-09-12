@@ -62,13 +62,13 @@ flowchart TD
     D -. So sánh với resolved .-> K["unresolved.txt (Ứng viên VHost Fuzzing)"]
 ```
 
-### Stage 1: Phát hiện và lọc Wildcard DNS (`puredns`)
-* **Vấn đề thực tế**: Một số tổ chức cấu hình DNS wildcard (ví dụ: `*.example.com` $\rightarrow$ IP của CDN/WAF hoặc Landing page mặc định). Khi đó, hàng ngàn subdomain rác hoặc ngẫu nhiên đều trả về IP, gây ra hàng loạt False Positive (ảo giác subdomain) và làm nghẽn bước VHost Fuzzing sau này.
-* **Cơ chế xử lý**:
-  1. Script tìm file resolvers tại `/usr/share/wordlists/resolvers.txt`. Nếu chưa có, script tự động tải danh sách public resolvers chuẩn từ Trickest GitHub.
-  2. Thực thi `puredns resolve` trên danh sách subdomains đầu vào. `puredns` tự động kiểm tra xem domain có cấu hình wildcard hay không bằng cách gửi các truy vấn DNS giả lập ngẫu nhiên.
-  3. Lọc bỏ toàn bộ các subdomain thuộc wildcard và xuất danh sách các subdomain này vào `wildcard_filtered.txt`.
-  4. Giữ lại danh sách các subdomain thực sự hợp lệ (`clean.txt`) để chuyển sang Stage 2.
+### Stage 1: Phát hiện và lọc Wildcard DNS (`puredns` + `host` verification)
+* **Vấn đề thực tế**: Một số tổ chức cấu hình DNS wildcard (ví dụ: `*.example.com` $\rightarrow$ IP của CDN/WAF hoặc Landing page mặc định). Khi đó, hàng ngàn subdomain rác hoặc ngẫu nhiên đều trả về IP, gây ra hàng loạt False Positive (ảo giác subdomain) và làm nghẽn bước VHost Fuzzing sau này. Tuy nhiên, nếu resolvers công cộng bị timeout hoặc `puredns` phân loại nhầm, một số subdomain hợp lệ có thể bị loại oan.
+* **Cơ chế xử lý 2 lớp an toàn**:
+  1. **Lớp 1 (`puredns`)**: Tìm file resolvers tại `/usr/share/wordlists/resolvers.txt` (hoặc tự động tải từ Trickest GitHub) và chạy `puredns resolve` để phát hiện wildcard.
+  2. **Lớp 2 (Xác thực lại bằng `host <domain>`)**: Trước khi quyết định đưa một subdomain vào `wildcard_filtered.txt`, script chạy lệnh `host` (hoặc `dig`) trực tiếp lên domain đó:
+     * Nếu kết quả trả về `not found` (hoặc `NXDOMAIN`), domain mới chính thức bị đưa vào `wildcard_filtered.txt`.
+     * Nếu domain **vẫn resolve ra địa chỉ IP / CNAME hợp lệ**, chứng tỏ bước trên resolve bị thiếu/timeout; script sẽ tự động **cứu lại (Rescue)** domain đó vào danh sách sạch (`clean.txt`) để chuyển tiếp sang bước DNS resolution.
 
 ### Stage 2: Phân giải địa chỉ IP (`dnsx` / `dig`)
 * **Sử dụng `dnsx` (Ưu tiên)**:

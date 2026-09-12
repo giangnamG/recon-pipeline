@@ -63,17 +63,52 @@ if cmd_exists puredns; then
             --quiet 2>/dev/null || true
 
         if [[ -s "${TEMP_DIR}/puredns_clean.txt" ]]; then
-            # Lưu các domain bị loại do wildcard DNS
+            # Lấy các domain nghi ngờ bị puredns loại bỏ
             comm -23 \
                 <(sort -u "$CLEAN_LIST") \
                 <(sort -u "${TEMP_DIR}/puredns_clean.txt") \
-                > "$OUT_WILDCARD"
+                > "${TEMP_DIR}/wildcard_candidates.txt"
+
+            # Kiểm tra lại bằng lệnh host:
+            # - Chỉ đưa vào wildcard_filtered.txt nếu host báo lỗi "not found" / NXDOMAIN
+            # - Nếu host vẫn resolve được -> giữ lại (tránh puredns resolve thiếu / timeout)
+            CANDIDATE_COUNT=$(count_lines "${TEMP_DIR}/wildcard_candidates.txt")
+            if [[ "$CANDIDATE_COUNT" -gt 0 ]]; then
+                info "Verifying $CANDIDATE_COUNT wildcard candidate(s) with 'host' command..."
+                while IFS= read -r dom; do
+                    [[ -z "$dom" ]] && continue
+                    host_out=""
+                    if cmd_exists host; then
+                        host_out=$(host "$dom" 2>&1) || true
+                        if echo "$host_out" | grep -iq "not found\|NXDOMAIN"; then
+                            echo "$dom" >> "$OUT_WILDCARD"
+                        elif echo "$host_out" | grep -iq "has address\|has IPv6 address\|is an alias for"; then
+                            warn "  [RESCUED] $dom vẫn resolve được qua host -> giữ lại vào clean list"
+                            echo "$dom" >> "${TEMP_DIR}/puredns_clean.txt"
+                        else
+                            echo "$dom" >> "$OUT_WILDCARD"
+                        fi
+                    else
+                        # Fallback bằng dig nếu không có lệnh host
+                        ip=$(dig +short A "$dom" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+                        if [[ -z "$ip" ]]; then
+                            echo "$dom" >> "$OUT_WILDCARD"
+                        else
+                            warn "  [RESCUED] $dom vẫn resolve được qua dig -> giữ lại vào clean list"
+                            echo "$dom" >> "${TEMP_DIR}/puredns_clean.txt"
+                        fi
+                    fi
+                done < "${TEMP_DIR}/wildcard_candidates.txt"
+            fi
+
+            sort -u "${TEMP_DIR}/puredns_clean.txt" -o "${TEMP_DIR}/puredns_clean.txt"
+            sort -u "$OUT_WILDCARD" -o "$OUT_WILDCARD"
 
             CLEAN_LIST="${TEMP_DIR}/puredns_clean.txt"
 
             AFTER=$(count_lines "$CLEAN_LIST")
             WILDCARD_COUNT=$(count_lines "$OUT_WILDCARD")
-            success "puredns: ${TOTAL_INPUT} → ${AFTER} (removed ${WILDCARD_COUNT} wildcard FPs → wildcard_filtered.txt)"
+            success "puredns + host check: ${TOTAL_INPUT} → ${AFTER} (confirmed ${WILDCARD_COUNT} wildcard/not-found FPs → wildcard_filtered.txt)"
         else
             # puredns chạy nhưng không ra output — resolver list lỗi, crash, hoặc timeout
             # CLEAN_LIST giữ nguyên list gốc → dnsx sẽ resolve tất cả kể cả wildcard FP
