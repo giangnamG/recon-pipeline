@@ -445,26 +445,94 @@ else
         cp "$FFUF_WORDLIST" "$FFUF_FILTERED_WL"
     fi
 
+    # ── Dedup IPs theo /24 subnet — tránh fuzz N IPs cùng server ──────
+    # Nhiều IPs trong cùng /24 thường là load balancer member, respond giống nhau.
+    # Chỉ lấy 1 IP đại diện mỗi /24 → giảm ffuf jobs đáng kể.
+    # Nếu cần fuzz tất cả: xóa block này và dùng IN_ORIGIN_IPS trực tiếp.
+    FFUF_TARGET_IPS="${TEMP_DIR}/ffuf_target_ips.txt"
+    > "$FFUF_TARGET_IPS"
+    declare -A seen_subnet
     while IFS= read -r ip; do
         [[ -z "$ip" ]] && continue
-        info "ffuf → $ip (domain: ${DOMAIN})"
-        FFUF_JSON="${TEMP_DIR}/ffuf_${ip//\./_}.json"
+        subnet="${ip%.*}"   # lấy /24 prefix: x.x.x
+        if [[ -z "${seen_subnet[$subnet]+_}" ]]; then
+            seen_subnet[$subnet]=1
+            echo "$ip" >> "$FFUF_TARGET_IPS"
+        fi
+    done < "$IN_ORIGIN_IPS"
+    FFUF_TARGET_COUNT=$(wc -l < "$FFUF_TARGET_IPS")
+    ORIGIN_TOTAL=$(wc -l < "$IN_ORIGIN_IPS")
+    info "IP dedup /24: ${ORIGIN_TOTAL} → ${FFUF_TARGET_COUNT} unique subnets to fuzz"
 
+    # ── ffuf runner với -ac + fallback -fs ─────────────────────────────
+    run_ffuf_on_ip() {
+        local ip="$1" domain="$2" wl="$3" out_file="$4" temp_dir="$5"
+        local safe_ip="${ip//\./_}"
+        local json_ac="${temp_dir}/ffuf_${safe_ip}.json"
+
+        # Pass 1: -ac auto-calibrate
         ffuf \
-            -w "${FFUF_FILTERED_WL}:FUZZ" \
+            -w "${wl}:FUZZ" \
             -u "https://${ip}/" \
-            -H "Host: FUZZ.${DOMAIN}" \
+            -H "Host: FUZZ.${domain}" \
             -ac \
             -mc 200,201,204,301,302,307,308,401,403,405 \
-            -t 50 \
-            -timeout 8 \
-            -o "$FFUF_JSON" \
-            -of json \
-            -s \
+            -t 50 -timeout 8 \
+            -o "$json_ac" -of json -s \
             2>/dev/null || true
 
+        local ac_count=0
+        if [[ -f "$json_ac" ]]; then
+            ac_count=$(python3 -c "
+import json,sys
+try: print(len(json.load(open('$json_ac')).get('results',[])))
+except: print(0)" 2>/dev/null || echo 0)
+        fi
+
+        if [[ "$ac_count" -gt 0 ]]; then
+            echo "  [ffuf] ${ip}: ${ac_count} results (ac pass)"
+            return 0   # parse_ffuf_json caller handles writing
+        fi
+
+        # Pass 2: -ac missed everything → probe baseline size, retry with -fs
+        local rnd_host="zznotreal${RANDOM}.${domain}"
+        local baseline_size
+        baseline_size=$(curl -sk -m 8 \
+            -H "Host: ${rnd_host}" \
+            --resolve "${rnd_host}:443:${ip}" \
+            "https://${ip}/" \
+            -w '%{size_download}' -o /dev/null 2>/dev/null || echo 0)
+
+        if [[ "$baseline_size" -gt 0 ]]; then
+            local json_fs="${temp_dir}/ffuf_${safe_ip}_fs.json"
+            ffuf \
+                -w "${wl}:FUZZ" \
+                -u "https://${ip}/" \
+                -H "Host: FUZZ.${domain}" \
+                -fs "$baseline_size" \
+                -mc 200,201,204,301,302,307,308,401,403,405 \
+                -t 50 -timeout 8 \
+                -o "$json_fs" -of json -s \
+                2>/dev/null || true
+            # Merge json_fs → json_ac slot so caller parses it
+            [[ -f "$json_fs" ]] && cp "$json_fs" "$json_ac"
+            local fs_count=0
+            [[ -f "$json_ac" ]] && fs_count=$(python3 -c "
+import json
+try: print(len(json.load(open('$json_ac')).get('results',[])))
+except: print(0)" 2>/dev/null || echo 0)
+            echo "  [ffuf] ${ip}: ac=0, fs fallback (size=${baseline_size}b) → ${fs_count} results"
+        fi
+    }
+
+    while IFS= read -r ip; do
+        [[ -z "$ip" ]] && continue
+        info "ffuf → $ip"
+        FFUF_JSON="${TEMP_DIR}/ffuf_${ip//\./_}.json"
+
+        run_ffuf_on_ip "$ip" "$DOMAIN" "$FFUF_FILTERED_WL" "$OUT_FFUF" "$TEMP_DIR"
         parse_ffuf_json "$FFUF_JSON" "$DOMAIN" "$ip" "$OUT_FFUF" "ffuf"
-    done < "$IN_ORIGIN_IPS"
+    done < "$FFUF_TARGET_IPS"
 
     FFUF_COUNT=$(count_lines "$OUT_FFUF")
     success "Layer 2: ${FFUF_COUNT} ffuf findings"
