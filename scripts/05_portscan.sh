@@ -29,25 +29,24 @@
 #     --skip-cdn-check         Scan cả CDN IPs (không khuyến nghị)
 # -----------------------------------------------------------------------------
 
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
 
-require_target "$@"
-TARGET="$1"; shift || true
-DOMAIN="$TARGET"
+[[ $# -lt 1 ]] && { usage "$0 <domain>"; exit 1; }
+DOMAIN="$(normalize_domain "$1")"
 
-OUT_DIR="$(get_target_dir "$TARGET")"
+OUT_DIR="$(output_dir "$DOMAIN")"
 PORT_DIR="${OUT_DIR}/ports"
 mkdir -p "$PORT_DIR"
 
-IN_ORIGIN="${OUT_DIR}/cdn/origin_ips.txt"
-IN_IPS="$IN_ORIGIN"
-IN_RESOLVED="${OUT_DIR}/subdomains/resolved.txt"
+IN_IPS="${OUT_DIR}/origin_ips.txt"
+IN_RESOLVED="${OUT_DIR}/resolved.txt"
 
 OUT_OPEN="${PORT_DIR}/open.txt"
 OUT_CLOSED="${PORT_DIR}/closed_ips.txt"
+OUT_WEB="${PORT_DIR}/web.txt"
 OUT_URLS="${PORT_DIR}/candidate_urls.txt"
 OUT_GOGO_JSON="${PORT_DIR}/gogo.json"
 OUT_FINGERPRINT="${PORT_DIR}/fingerprint.txt"
